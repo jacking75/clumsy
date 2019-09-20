@@ -1,5 +1,4 @@
--- currently only supports vs2010.
--- and premake4 4.4 doesn't have vs2012 support yet. but seems auto upgrade works fine
+-- Premake 5
 
 if _ACTION == 'clean' then
     os.rmdir('./build')
@@ -10,10 +9,10 @@ end
 
 local LIB_DIVERT_VC11 = 'external/WinDivert-2.1.0-A'
 local LIB_DIVERT_MINGW = 'external/WinDivert-2.1.0-A'
-local LIB_IUP_WIN32_VC11 = 'external/iup-3.16_Win32_dll11_lib'
-local LIB_IUP_WIN64_VC11 = 'external/iup-3.16_Win64_dll11_lib'
-local LIB_IUP_WIN32_MINGW = 'external/iup-3.16_Win32_mingw4_lib'
-local LIB_IUP_WIN64_MINGW = 'external/iup-3.16_Win64_mingw4_lib'
+local LIB_IUP_WIN32_VC11 = 'external/iup-3.27_Win32_dll15_lib'
+local LIB_IUP_WIN64_VC11 = 'external/iup-3.27_Win64_dll15_lib'
+local LIB_IUP_WIN32_MINGW = 'external/iup-3.27_Win32_mingw6_lib'
+local LIB_IUP_WIN64_MINGW = 'external/iup-3.27_Win64_mingw6_lib'
 
 
 solution('clumsy')
@@ -32,13 +31,13 @@ solution('clumsy')
         end
 
         configuration('Debug')
-            flags({'ExtraWarnings', 'Symbols'})
+			flags({warnings "Extra"})
             defines({'_DEBUG'})
             kind("ConsoleApp")
 
         configuration('Release')
-            flags({'Optimize'})
-            flags({'Symbols'}) -- keep the debug symbols for development
+			flags({optimize "On"})            
+			flags({symbols "On"}) -- keep the debug symbols for development
             defines({'NDEBUG'})
             kind("WindowedApp")
 
@@ -47,15 +46,17 @@ solution('clumsy')
             buildoptions({'-Wno-missing-braces', '--std=c99'}) -- suppress a bug in gcc warns about {0} initialization
             --linkoptions({'--std=c90'})
             -- notice that tdm-gcc use static runtime by default
-            objdir('obj_vs')
+            objdir('obj_gmake')
 
         configuration("vs*")
             defines({"_CRT_SECURE_NO_WARNINGS"})
             flags({'NoManifest'})
             kind("WindowedApp") -- We don't need the console window in VS as we use OutputDebugString().
             buildoptions({'/wd"4214"'})
+			linkoptions({'/ENTRY:"mainCRTStartup" /SAFESEH:NO'})
+			characterset("MBCS")
             includedirs({LIB_DIVERT_VC11 .. '/include'})
-            objdir('obj_gmake')
+            objdir('obj_vs')
 
         configuration({'x32', 'vs*'})
             -- defines would be passed to resource compiler for whatever reason
