@@ -101,6 +101,7 @@ static short resetProcess(PacketNode *head, PacketNode *tail) {
                 pTcpHdr->Rst = 1;
                 WinDivertHelperCalcChecksums(pac->packet, pac->packetLen, NULL, 0);
 
+                InterlockedIncrement(&resetModule.affectedCount);
                 reset = TRUE;
                 if (setNextCount > 0) {
                     InterlockedDecrement16(&setNextCount);
@@ -113,6 +114,26 @@ static short resetProcess(PacketNode *head, PacketNode *tail) {
     return reset;
 }
 
+static int resetSetParam(const char *key, const char *value) {
+    if (strcmp(key, "reset-chance") == 0) {
+        short v = I2S((int)(atof(value) * 100.0 + 0.5));
+        char buf[16];
+        if (v < 0) v = 0; if (v > 10000) v = 10000;
+        InterlockedExchange16(&chance, v);
+        sprintf(buf, "%.1f", (float)v / 100.0f);
+        if (chanceInput) IupStoreAttribute(chanceInput, "VALUE", buf);
+        return 1;
+    }
+    return 0;
+}
+
+static int resetGetParams(ParamKV *kv, int maxKv) {
+    if (maxKv < 1) return 0;
+    strcpy(kv[0].key, "reset-chance");
+    sprintf(kv[0].val, "%.1f", (float)chance / 100.0f);
+    return 1;
+}
+
 Module resetModule = {
     "Set TCP RST",
     NAME,
@@ -121,6 +142,8 @@ Module resetModule = {
     resetStartup,
     resetCloseDown,
     resetProcess,
+    resetSetParam,
+    resetGetParams,
     // runtime fields
-    0, 0, NULL
+    0, 0, NULL, 0
 };

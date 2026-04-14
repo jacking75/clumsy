@@ -3,5 +3,20 @@ build
 *.swp
 etc/clumsy.aps
 obj_vs
+obj_msvc
 obj_ninja
 obj_gmake
+robolog.txt
+
+# Visual Studio
+.vs/
+*.user
+*.suo
+*.ncb
+*.sdf
+*.opensdf
+*.VC.db
+*.VC.opendb
+
+# Claude Code
+.claude/

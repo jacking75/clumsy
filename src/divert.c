@@ -16,6 +16,10 @@ static HANDLE divertHandle;
 static volatile short stopLooping;
 static HANDLE loopThread, clockThread, mutex;
 
+// global stats counters
+volatile LONG statsCapturedTotal = 0;
+volatile LONG statsSentTotal = 0;
+
 static DWORD divertReadLoop(LPVOID arg);
 static DWORD divertClockLoop(LPVOID arg);
 
@@ -196,6 +200,7 @@ static int sendAllListPackets() {
 
         freeNode(pnode);
         ++sendCount;
+        InterlockedIncrement(&statsSentTotal);
     }
     assert(isListEmpty()); // all packets should be sent by now
 
@@ -361,6 +366,7 @@ static DWORD divertReadLoop(LPVOID arg) {
                     return 0;
                 }
                 // create node and put it into the list
+                InterlockedIncrement(&statsCapturedTotal);
                 pnode = createNode(packetBuf, readLen, &addrBuf);
                 appendNode(pnode);
                 divertConsumeStep();
@@ -381,6 +387,15 @@ static DWORD divertReadLoop(LPVOID arg) {
                 LOG("Acquire failed.");
                 return 0;
         }
+    }
+}
+
+void statsReset(void) {
+    int ix;
+    InterlockedExchange(&statsCapturedTotal, 0);
+    InterlockedExchange(&statsSentTotal, 0);
+    for (ix = 0; ix < MODULE_CNT; ++ix) {
+        InterlockedExchange(&(modules[ix]->affectedCount), 0);
     }
 }
 

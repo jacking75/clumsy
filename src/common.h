@@ -8,7 +8,7 @@
 #define MSG_BUFSIZE 512
 #define FILTER_BUFSIZE 1024
 #define NAME_SIZE 16
-#define MODULE_CNT 8
+#define MODULE_CNT 11
 #define ICON_UPDATE_MS 200
 
 #define CONTROLS_HANDLE "__CONTROLS_HANDLE"
@@ -118,6 +118,11 @@ int uiSyncFixed(Ihandle *ih);
 int uiSyncInt32(Ihandle *ih);
 
 
+// key-value pair for module parameter serialization (used by profiles)
+#define PARAM_KEY_SIZE 48
+#define PARAM_VAL_SIZE 64
+typedef struct { char key[PARAM_KEY_SIZE]; char val[PARAM_VAL_SIZE]; } ParamKV;
+
 // module
 typedef struct {
     /*
@@ -130,16 +135,29 @@ typedef struct {
     void (*startUp)(); // called when starting up the module
     void (*closeDown)(PacketNode *head, PacketNode *tail); // called when starting up the module
     short (*process)(PacketNode *head, PacketNode *tail);
+    /* pipe API: set a named parameter from a string value.
+     * key uses the same CLI-style names as --module-param (e.g. "lag-time").
+     * Chance values are passed as percentage strings ("10.0" = 10%).
+     * Returns 1 if key was recognised, 0 otherwise. NULL if module has no params. */
+    int (*setParam)(const char *key, const char *value);
+    /* profile API: read current parameter values.
+     * Fills kv[] with key-value pairs (same key format as setParam).
+     * Returns number of pairs written. NULL if module has no params. */
+    int (*getParams)(ParamKV *kv, int maxKv);
     /*
      * Flags used during program excution. Need to be re initialized on each run
      */
     short lastEnabled; // if it is enabled on last run
-    short processTriggered; // whether this module has been triggered in last step 
+    short processTriggered; // whether this module has been triggered in last step
     Ihandle *iconHandle; // store the icon to be updated
+    volatile LONG affectedCount; // cumulative packets affected by this module
 } Module;
 
 extern Module lagModule;
+extern Module jitterModule;
 extern Module dropModule;
+extern Module burstlossModule;
+extern Module blackoutModule;
 extern Module throttleModule;
 extern Module oodModule;
 extern Module dupModule;
@@ -161,6 +179,52 @@ void showStatus(const char* line);
 // WinDivert
 int divertStart(const char * filter, char buf[]);
 void divertStop();
+
+// Real-time statistics (divert.c)
+extern volatile LONG statsCapturedTotal;
+extern volatile LONG statsSentTotal;
+void statsReset(void);
+
+// Module buffer getters for stats panel
+int lagGetBufSize(void);
+int jitterGetBufSize(void);
+int bandwidthGetBufSize(void);
+LONG bandwidthGetLimitKBps(void);
+
+// Stats log file output  (statslog.c)
+void statsLogStart(const char *path, int intervalSec);
+void statsLogStop(void);
+void statsLogTick(void);
+
+// Process-based filter  (procfilter.c)
+// Resolves processName to local ports and writes a WinDivert filter fragment
+// like " and (tcp.SrcPort == X or tcp.DstPort == X or ...)" into filterBuf.
+// Returns port count on success, 0 if name is empty, -1 on error (errBuf filled).
+int buildProcessFilter(const char *processName, char *filterBuf, int bufSize,
+                       char *errBuf, int errSize);
+
+// Named Pipe control API  (pipe.c)
+void pipeServerStart(void);
+void pipeServerStop(void);
+extern volatile short pipeStopRequested; // set by "stop" command; checked in main timer
+
+// Shared module-KV helper  (utils.c)
+// Applies one key=value pair to the matching module (enable/disable or setParam).
+int applyModuleKV(const char *key, const char *value);
+
+// Scenario scripting  (scenario.c)
+void scenarioLoad(const char *path);
+void scenarioStart(void);
+void scenarioStop(void);
+void scenarioTick(void);
+int  scenarioIsLoaded(void);
+
+// Profile save/load  (profile.c)
+void        profilesLoad(void);          // loads profiles.json from exe directory
+int         profileApply(const char *name); // 1=ok, 0=not found
+int         profileSaveCurrent(const char *name); // save current module state, 1=ok
+int         profileCount(void);
+const char* profileGetName(int ix);      // 0-indexed
 
 // utils
 // STR to convert int macro to string

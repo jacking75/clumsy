@@ -130,6 +130,29 @@ int uiSyncFixed(Ihandle *ih) {
 }
 
 
+// Apply a single key-value pair to the appropriate module.
+// key is either a module shortName (true/false → enable/disable)
+// or a setParam key (e.g. "lag-time", "drop-chance").
+// Returns 1 if the key was recognized and applied, 0 otherwise.
+int applyModuleKV(const char *key, const char *value) {
+    int j;
+    // 1. module shortName → enable / disable
+    for (j = 0; j < MODULE_CNT; j++) {
+        if (strcmp(modules[j]->shortName, key) == 0) {
+            short en = (strcmp(value, "true") == 0 || strcmp(value, "1") == 0) ? 1 : 0;
+            InterlockedExchange16(modules[j]->enabledFlag, en);
+            return 1;
+        }
+    }
+    // 2. param key → delegate to the owning module
+    for (j = 0; j < MODULE_CNT; j++) {
+        if (modules[j]->setParam && modules[j]->setParam(key, value)) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
 // indicator icon, generated from scripts/im2carr.py
 const unsigned char icon8x8[8*8] = {
     0, 0, 1, 1, 1, 1, 0, 0,

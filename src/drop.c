@@ -64,6 +64,7 @@ static short dropProcess(PacketNode *head, PacketNode* tail) {
                 chance/100.0, pac->addr.Outbound ? "OUTBOUND" : "INBOUND");
             freeNode(popNode(pac));
             ++dropped;
+            InterlockedIncrement(&dropModule.affectedCount);
         } else {
             head = head->next;
         }
@@ -73,6 +74,26 @@ static short dropProcess(PacketNode *head, PacketNode* tail) {
 }
 
 
+static int dropSetParam(const char *key, const char *value) {
+    if (strcmp(key, "drop-chance") == 0) {
+        short v = I2S((int)(atof(value) * 100.0 + 0.5));
+        char buf[16];
+        if (v < 0) v = 0; if (v > 10000) v = 10000;
+        InterlockedExchange16(&chance, v);
+        sprintf(buf, "%.1f", (float)v / 100.0f);
+        if (chanceInput) IupStoreAttribute(chanceInput, "VALUE", buf);
+        return 1;
+    }
+    return 0;
+}
+
+static int dropGetParams(ParamKV *kv, int maxKv) {
+    if (maxKv < 1) return 0;
+    strcpy(kv[0].key, "drop-chance");
+    sprintf(kv[0].val, "%.1f", (float)chance / 100.0f);
+    return 1;
+}
+
 Module dropModule = {
     "Drop",
     NAME,
@@ -81,6 +102,8 @@ Module dropModule = {
     dropStartUp,
     dropCloseDown,
     dropProcess,
+    dropSetParam,
+    dropGetParams,
     // runtime fields
-    0, 0, NULL
+    0, 0, NULL, 0
 };

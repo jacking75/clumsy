@@ -20,8 +20,64 @@ all ipv4 against port: tcp.DstPort == 12354 or tcp.SrcPort == 12354 or udp.DstPo
 tcp ipv4 against port: tcp and (tcp.DstPort == 12354 or tcp.SrcPort == 12354)
 udp ipv4 against port: udp and (udp.DstPort == 12354 or udp.SrcPort == 12354)
 
-# ipv6 is supported but usually not that useful
+# --- Game Engine / Service presets ---
+
+# Unreal Engine default game port
+unreal engine (7777): udp and (udp.DstPort == 7777 or udp.SrcPort == 7777)
+
+# Unity Netcode for GameObjects / Relay default port
+unity netcode (9000): udp and (udp.DstPort == 9000 or udp.SrcPort == 9000)
+
+# Unity Transport default port range
+unity transport (7770-7780): udp and ((udp.DstPort >= 7770 and udp.DstPort <= 7780) or (udp.SrcPort >= 7770 and udp.SrcPort <= 7780))
+
+# Photon Engine (Realtime/PUN2) default ports
+photon engine: udp and (udp.DstPort == 5055 or udp.SrcPort == 5055 or udp.DstPort == 5056 or udp.SrcPort == 5056)
+
+# Steam game traffic (typical UDP range)
+steam game: udp and (udp.DstPort >= 27000 and udp.DstPort <= 27036)
+
+# Steam game + query ports
+steam game+query: udp and ((udp.DstPort >= 27000 and udp.DstPort <= 27050) or (udp.SrcPort >= 27000 and udp.SrcPort <= 27050))
+
+# Epic Online Services (STUN/TURN)
+epic online services: udp and (udp.DstPort == 3478 or udp.DstPort == 3479 or udp.SrcPort == 3478 or udp.SrcPort == 3479)
+
+# Godot Engine ENet default port
+godot enet (6007): udp and (udp.DstPort == 6007 or udp.SrcPort == 6007)
+
+# Mirror Networking (Unity) default port
+mirror networking (7777): tcp and (tcp.DstPort == 7777 or tcp.SrcPort == 7777)
+
+# FishNet (Unity) default port
+fishnet (7770): udp and (udp.DstPort == 7770 or udp.SrcPort == 7770)
+
+# Minecraft (Java Edition)
+minecraft java: tcp and (tcp.DstPort == 25565 or tcp.SrcPort == 25565)
+
+# Minecraft (Bedrock Edition)
+minecraft bedrock: udp and (udp.DstPort == 19132 or udp.SrcPort == 19132)
+
+# --- General game patterns ---
+
+# high-port UDP (typical for game clients)
+game udp high ports: udp and ((udp.DstPort >= 7000 and udp.DstPort <= 8000) or (udp.SrcPort >= 7000 and udp.SrcPort <= 8000))
+
+# --- IPv6 presets ---
+
+# NOTE: IPv6 address filters (::1, 2001:db8::1) contain colons which break
+# the legacy "name: filter" format. Use config.json for full IPv6 support.
+
 ipv6 all: ipv6
+ipv6 tcp: ipv6 and tcp
+ipv6 udp: ipv6 and udp
+ipv6 against port: ipv6 and (tcp.DstPort == 12354 or tcp.SrcPort == 12354 or udp.DstPort == 12354 or udp.SrcPort == 12354)
+
+# IPv6 game engine presets
+ipv6 unreal engine (7777): ipv6 and udp and (udp.DstPort == 7777 or udp.SrcPort == 7777)
+ipv6 unity netcode (9000): ipv6 and udp and (udp.DstPort == 9000 or udp.SrcPort == 9000)
+ipv6 steam game: ipv6 and udp and (udp.DstPort >= 27000 and udp.DstPort <= 27036)
+ipv6 game udp high ports: ipv6 and udp and ((udp.DstPort >= 7000 and udp.DstPort <= 8000) or (udp.SrcPort >= 7000 and udp.SrcPort <= 8000))
 
 # you can add your usual filters here for your own use:
 #http requests ONLY(data transmit on other ports): outbound and tcp.DstPort == 80

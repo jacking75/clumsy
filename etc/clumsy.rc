@@ -25,12 +25,6 @@ END
 /****************************************************/
 /* The following lines will enable Windows XP/Vista Visual Styles */
 
-#ifdef X64
-/* 64 bit */
 1 24 "clumsy64.manifest"
-#else
-/* 32 bit */
-1 24 "clumsy.manifest"
-#endif
 
 /****************************************************/

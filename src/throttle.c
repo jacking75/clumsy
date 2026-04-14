@@ -134,6 +134,7 @@ THROTTLE_START:
                 if (checkDirection(pac->addr.Outbound, throttleInbound, throttleOutbound)) {
                     insertAfter(popNode(pac), bufHead);
                     ++bufSize;
+                    InterlockedIncrement(&throttleModule.affectedCount);
                     pac = tail->prev;
                 } else {
                     pac = pac->prev;
@@ -155,6 +156,40 @@ THROTTLE_START:
     return throttled;
 }
 
+static int throttleSetParam(const char *key, const char *value) {
+    if (strcmp(key, "throttle-chance") == 0) {
+        short v = I2S((int)(atof(value) * 100.0 + 0.5));
+        char buf[16];
+        if (v < 0) v = 0; if (v > 10000) v = 10000;
+        InterlockedExchange16(&chance, v);
+        sprintf(buf, "%.1f", (float)v / 100.0f);
+        if (chanceInput) IupStoreAttribute(chanceInput, "VALUE", buf);
+        return 1;
+    }
+    if (strcmp(key, "throttle-frame") == 0) {
+        int v = atoi(value);
+        char buf[16];
+        if (v < 0) v = 0; if (v > 1000) v = 1000;
+        InterlockedExchange16(&throttleFrame, I2S(v));
+        sprintf(buf, "%d", v);
+        if (frameInput) IupStoreAttribute(frameInput, "VALUE", buf);
+        return 1;
+    }
+    return 0;
+}
+
+static int throttleGetParams(ParamKV *kv, int maxKv) {
+    int n = 0;
+    if (maxKv < 2) return 0;
+    strcpy(kv[n].key, "throttle-chance");
+    sprintf(kv[n].val, "%.1f", (float)chance / 100.0f);
+    n++;
+    strcpy(kv[n].key, "throttle-frame");
+    sprintf(kv[n].val, "%d", (int)throttleFrame);
+    n++;
+    return n;
+}
+
 Module throttleModule = {
     "Throttle",
     NAME,
@@ -163,6 +198,8 @@ Module throttleModule = {
     throttleStartUp,
     throttleCloseDown,
     throttleProcess,
+    throttleSetParam,
+    throttleGetParams,
     // runtime fields
-    0, 0, NULL
+    0, 0, NULL, 0
 };

@@ -76,12 +76,47 @@ static short dupProcess(PacketNode *head, PacketNode *tail) {
             while (copies--) {
                 PacketNode *copy = createNode(pac->packet, pac->packetLen, &(pac->addr));
                 insertBefore(copy, pac); // must insertBefore or next packet is still pac
+                InterlockedIncrement(&dupModule.affectedCount);
             }
             duped = TRUE;
         }
         pac = pac->next;
     }
     return duped;
+}
+
+static int dupSetParam(const char *key, const char *value) {
+    if (strcmp(key, "duplicate-chance") == 0) {
+        short v = I2S((int)(atof(value) * 100.0 + 0.5));
+        char buf[16];
+        if (v < 0) v = 0; if (v > 10000) v = 10000;
+        InterlockedExchange16(&chance, v);
+        sprintf(buf, "%.1f", (float)v / 100.0f);
+        if (chanceInput) IupStoreAttribute(chanceInput, "VALUE", buf);
+        return 1;
+    }
+    if (strcmp(key, "duplicate-count") == 0) {
+        int v = atoi(value);
+        char buf[16];
+        if (v < 2) v = 2; if (v > 50) v = 50;
+        InterlockedExchange16(&count, I2S(v));
+        sprintf(buf, "%d", v);
+        if (countInput) IupStoreAttribute(countInput, "VALUE", buf);
+        return 1;
+    }
+    return 0;
+}
+
+static int dupGetParams(ParamKV *kv, int maxKv) {
+    int n = 0;
+    if (maxKv < 2) return 0;
+    strcpy(kv[n].key, "duplicate-chance");
+    sprintf(kv[n].val, "%.1f", (float)chance / 100.0f);
+    n++;
+    strcpy(kv[n].key, "duplicate-count");
+    sprintf(kv[n].val, "%d", (int)count);
+    n++;
+    return n;
 }
 
 Module dupModule = {
@@ -92,6 +127,8 @@ Module dupModule = {
     dupStartup,
     dupCloseDown,
     dupProcess,
+    dupSetParam,
+    dupGetParams,
     // runtime fields
-    0, 0, NULL
+    0, 0, NULL, 0
 };

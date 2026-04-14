@@ -1,0 +1,23 @@
+[
+  { "at": 0,
+    "lag": true,    "lag-time": 80 },
+
+  { "at": 10,
+    "jitter": true, "jitter-min": 10, "jitter-max": 60 },
+
+  { "at": 20,
+    "drop": true,   "drop-chance": 5.0 },
+
+  { "at": 35,
+    "burstloss": true,
+    "burstloss-good": 1.0, "burstloss-bad": 60.0,
+    "burstloss-gb": 8.0,   "burstloss-bg": 25.0 },
+
+  { "at": 50,
+    "blackout": true, "blackout-duration": 3000, "blackout-gap": 20000,
+    "bandwidth": true, "bandwidth-bandwidth": 1000 },
+
+  { "at": 75,
+    "lag": false, "jitter": false, "drop": false,
+    "burstloss": false, "blackout": false, "bandwidth": false }
+]

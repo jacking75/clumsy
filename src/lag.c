@@ -91,6 +91,7 @@ static short lagProcess(PacketNode *head, PacketNode *tail) {
         if (checkDirection(pac->addr.Outbound, lagInbound, lagOutbound)) {
             insertAfter(popNode(pac), bufHead)->timestamp = timeGetTime();
             ++bufSize;
+            InterlockedIncrement(&lagModule.affectedCount);
             pac = tail->prev;
         } else {
             pac = pac->prev;
@@ -122,6 +123,28 @@ static short lagProcess(PacketNode *head, PacketNode *tail) {
     return bufSize > 0;
 }
 
+static int lagSetParam(const char *key, const char *value) {
+    if (strcmp(key, "lag-time") == 0) {
+        int v = atoi(value);
+        char buf[16];
+        if (v < 0) v = 0; if (v > 15000) v = 15000;
+        InterlockedExchange16(&lagTime, I2S(v));
+        sprintf(buf, "%d", v);
+        if (timeInput) IupStoreAttribute(timeInput, "VALUE", buf);
+        return 1;
+    }
+    return 0;
+}
+
+static int lagGetParams(ParamKV *kv, int maxKv) {
+    if (maxKv < 1) return 0;
+    strcpy(kv[0].key, "lag-time");
+    sprintf(kv[0].val, "%d", (int)lagTime);
+    return 1;
+}
+
+int lagGetBufSize(void) { return bufSize; }
+
 Module lagModule = {
     "Lag",
     NAME,
@@ -130,6 +153,8 @@ Module lagModule = {
     lagStartUp,
     lagCloseDown,
     lagProcess,
+    lagSetParam,
+    lagGetParams,
     // runtime fields
-    0, 0, NULL
+    0, 0, NULL, 0
 };
