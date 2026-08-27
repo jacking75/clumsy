@@ -12,10 +12,9 @@
 //   release packet = deduct packet_size tokens, send in FIFO order
 
 #include <stdlib.h>
-#include <Windows.h>
 #include <stdint.h>
+#include <string.h>
 
-#include "iup.h"
 #include "common.h"
 
 #define NAME "bandwidth"
@@ -28,8 +27,6 @@
 // token bucket capacity = BUCKET_SECS seconds worth of bandwidth
 // (allows a short burst after idle period without penalty)
 #define BUCKET_SECS 2
-
-static Ihandle *inboundCheckbox, *outboundCheckbox, *bandwidthInput;
 
 static volatile short bandwidthEnabled  = 0,
     bandwidthInbound  = 1,
@@ -51,38 +48,6 @@ static INLINE_FUNCTION short isBufEmpty() {
     short ret = bufHead->next == bufTail;
     if (ret) assert(bufSize == 0);
     return ret;
-}
-
-static Ihandle* bandwidthSetupUI() {
-    Ihandle *bandwidthControlsBox = IupHbox(
-        inboundCheckbox  = IupToggle("Inbound",  NULL),
-        outboundCheckbox = IupToggle("Outbound", NULL),
-        IupLabel("Limit(KB/s):"),
-        bandwidthInput = IupText(NULL),
-        NULL
-    );
-
-    IupSetAttribute(bandwidthInput, "VISIBLECOLUMNS", "4");
-    IupSetAttribute(bandwidthInput, "VALUE", STR(BANDWIDTH_DEFAULT));
-    IupSetCallback(bandwidthInput, "VALUECHANGED_CB", uiSyncInt32);
-    IupSetAttribute(bandwidthInput, SYNCED_VALUE, (char*)&bandwidthLimit);
-    IupSetAttribute(bandwidthInput, INTEGER_MAX, BANDWIDTH_MAX);
-    IupSetAttribute(bandwidthInput, INTEGER_MIN, BANDWIDTH_MIN);
-    IupSetCallback(inboundCheckbox,  "ACTION", (Icallback)uiSyncToggle);
-    IupSetAttribute(inboundCheckbox,  SYNCED_VALUE, (char*)&bandwidthInbound);
-    IupSetCallback(outboundCheckbox, "ACTION", (Icallback)uiSyncToggle);
-    IupSetAttribute(outboundCheckbox, SYNCED_VALUE, (char*)&bandwidthOutbound);
-
-    IupSetAttribute(inboundCheckbox,  "VALUE", "ON");
-    IupSetAttribute(outboundCheckbox, "VALUE", "ON");
-
-    if (parameterized) {
-        setFromParameter(inboundCheckbox,  "VALUE", NAME"-inbound");
-        setFromParameter(outboundCheckbox, "VALUE", NAME"-outbound");
-        setFromParameter(bandwidthInput,   "VALUE", NAME"-bandwidth");
-    }
-
-    return bandwidthControlsBox;
 }
 
 static void bandwidthStartUp() {
@@ -141,7 +106,7 @@ static short bandwidthProcess(PacketNode *head, PacketNode *tail) {
     pac = tail->prev;
     while (pac != head) {
         prevPac = pac->prev;
-        if (checkDirection(pac->addr.Outbound, bandwidthInbound, bandwidthOutbound)) {
+        if (checkDirection(pac->meta.outbound, bandwidthInbound, bandwidthOutbound)) {
             if (bufSize < KEEP_AT_MOST) {
                 // insert at bufHead: iterating oldest-first means oldest ends up
                 // deepest, so bufTail->prev drains oldest first (FIFO preserved)
@@ -179,24 +144,38 @@ static short bandwidthProcess(PacketNode *head, PacketNode *tail) {
 }
 
 static int bandwidthSetParam(const char *key, const char *value) {
-    if (strcmp(key, "bandwidth-bandwidth") == 0) {
-        LONG v = atol(value);
-        char buf[16];
-        if (v < 0) v = 0; if (v > 99999) v = 99999;
-        InterlockedExchange(&bandwidthLimit, v);
-        sprintf(buf, "%ld", v);
-        if (bandwidthInput) IupStoreAttribute(bandwidthInput, "VALUE", buf);
+    if (strcmp(key, NAME"-bandwidth") == 0) {
+        InterlockedExchange(&bandwidthLimit, clampLong(atol(value), 0, 99999));
+        return 1;
+    }
+    if (strcmp(key, NAME"-inbound") == 0) {
+        InterlockedExchange16(&bandwidthInbound, (short)parseBoolValue(value));
+        return 1;
+    }
+    if (strcmp(key, NAME"-outbound") == 0) {
+        InterlockedExchange16(&bandwidthOutbound, (short)parseBoolValue(value));
         return 1;
     }
     return 0;
 }
 
 static int bandwidthGetParams(ParamKV *kv, int maxKv) {
-    if (maxKv < 1) return 0;
-    strcpy(kv[0].key, "bandwidth-bandwidth");
-    sprintf(kv[0].val, "%ld", bandwidthLimit);
-    return 1;
+    int n = 0;
+    if (maxKv < 3) return 0;
+    strcpy(kv[n].key, NAME"-bandwidth");
+    sprintf(kv[n].val, "%ld", bandwidthLimit); n++;
+    strcpy(kv[n].key, NAME"-inbound");
+    strcpy(kv[n].val, bandwidthInbound ? "true" : "false"); n++;
+    strcpy(kv[n].key, NAME"-outbound");
+    strcpy(kv[n].val, bandwidthOutbound ? "true" : "false"); n++;
+    return n;
 }
+
+static const ParamSpec bandwidthParamSpecs[] = {
+    { NAME"-inbound",   "Inbound",       "bool", 0, 0 },
+    { NAME"-outbound",  "Outbound",      "bool", 0, 0 },
+    { NAME"-bandwidth", "Limit (KB/s)",  "int",  0, 99999 },
+};
 
 int bandwidthGetBufSize(void) { return bufSize; }
 LONG bandwidthGetLimitKBps(void) { return bandwidthLimit; }
@@ -205,12 +184,13 @@ Module bandwidthModule = {
     "Bandwidth",
     NAME,
     (short*)&bandwidthEnabled,
-    bandwidthSetupUI,
     bandwidthStartUp,
     bandwidthCloseDown,
     bandwidthProcess,
     bandwidthSetParam,
     bandwidthGetParams,
+    bandwidthParamSpecs,
+    (int)(sizeof(bandwidthParamSpecs) / sizeof(bandwidthParamSpecs[0])),
     // runtime fields
-    0, 0, NULL, 0
+    0, 0, 0
 };

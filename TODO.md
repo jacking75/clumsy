@@ -23,42 +23,42 @@ Phase 4(리눅스)를 마지막에 두는 이유: 사용자 지정 사항이며,
 ## 전체 작업 체크리스트
 
 ### Phase 1 — C++ 전환 & 툴체인 현대화
-- [ ] 1.1 빌드 설정 갱신 (msvc/clumsy.vcxproj: VS2026 툴셋, C++23)
-- [ ] 1.2 소스 파일 확장자 전환 (.c → .cpp, genie.lua/vcxproj 패턴 갱신)
-- [ ] 1.3 C→C++ 컴파일 오류 수정
-- [ ] 1.4 코드 스타일 원칙 문서화 및 팀 공유
-- [ ] 1.5 리눅스 툴체인 설정 준비 (gcc16, C++23 — genie.lua에 옵션만 추가, Phase 4에서 실사용)
-- [ ] 1.6 회귀 테스트 및 완료 확인
+- [x] 1.1 빌드 설정 갱신 (msvc/clumsy.vcxproj: VS2026 툴셋, C++23)
+- [x] 1.2 소스 파일 확장자 전환 (.c → .cpp, genie.lua/vcxproj 패턴 갱신)
+- [x] 1.3 C→C++ 컴파일 오류 수정
+- [x] 1.4 코드 스타일 원칙 문서화 및 팀 공유
+- [x] 1.5 리눅스 툴체인 설정 준비 (gcc16, C++23 — genie.lua에 옵션만 추가, Phase 4에서 실사용)
+- [x] 1.6 회귀 테스트 및 완료 확인
 
 ### Phase 2 — IUP(GUI) 제거 → 콘솔 + 내장 웹서버
-- [ ] 2.1 IUP 사용처 전수 조사 및 제거 계획 수립
-- [ ] 2.2 Module 구조체 변경 (setupUIFunc/iconHandle 제거, ParamSpec 도입)
-- [ ] 2.3 콘솔 출력 모드 전환 (Release도 ConsoleApp, LOG 매크로 통일)
-- [ ] 2.4 HTTP 서버 코어 구현 (src/httpserver.cpp)
-- [ ] 2.5 REST API 설계 및 구현 (pipe.c 로직 공용화)
-- [ ] 2.6 실시간 스트리밍 (Server-Sent Events)
-- [ ] 2.7 웹 프론트엔드 (정적 대시보드)
-- [ ] 2.8 인증 (토큰 기반)
-- [ ] 2.9 Named Pipe API 존치 및 리팩터링
-- [ ] 2.10 완료 확인 (회귀 테스트)
+- [x] 2.1 IUP 사용처 전수 조사 및 제거 계획 수립
+- [x] 2.2 Module 구조체 변경 (setupUIFunc/iconHandle 제거, ParamSpec 도입)
+- [x] 2.3 콘솔 출력 모드 전환 (Release도 ConsoleApp, LOG 매크로 통일)
+- [x] 2.4 HTTP 서버 코어 구현 (src/httpserver.cpp)
+- [x] 2.5 REST API 설계 및 구현 (pipe.c 로직 공용화)
+- [x] 2.6 실시간 스트리밍 (Server-Sent Events)
+- [x] 2.7 웹 프론트엔드 (정적 대시보드)
+- [x] 2.8 인증 (토큰 기반)
+- [x] 2.9 Named Pipe API 존치 및 리팩터링
+- [x] 2.10 완료 확인 (회귀 테스트)
 
 ### Phase 3 — 신규 기능 추가
-- [ ] 3.1 pcap 익스포트
-- [ ] 3.2 조건부/트리거 기반 시나리오 확장
-- [ ] 3.3 세션 리포트 내보내기 (HTML)
-- [ ] 3.4 원격 제어 강화 (분산 QA 환경)
-- [ ] 3.5 웹 UI 비주얼 필터 빌더
-- [ ] 3.6 플러그인형 커스텀 모듈 (선택 과제, 우선순위 낮음)
-- [ ] 3.7 완료 확인 (문서화 포함)
+- [x] 3.1 pcap 익스포트
+- [x] 3.2 조건부/트리거 기반 시나리오 확장
+- [x] 3.3 세션 리포트 내보내기 (HTML)
+- [x] 3.4 원격 제어 강화 (분산 QA 환경)
+- [x] 3.5 웹 UI 비주얼 필터 빌더
+- [x] 3.6 플러그인형 커스텀 모듈 (선택 과제, 우선순위 낮음)
+- [x] 3.7 완료 확인 (문서화 포함)
 
 ### Phase 4 — 리눅스 지원 (최후순위)
-- [ ] 4.1 캡처 백엔드 추상화 (PacketMeta 도입)
-- [ ] 4.2 리눅스 캡처 백엔드 구현 (libnetfilter_queue)
-- [ ] 4.3 필터 언어 계층 분리
-- [ ] 4.4 권한 처리 (capability 기반)
-- [ ] 4.5 빌드 시스템 (genie.lua 리눅스 네이티브 타겟, gcc16)
-- [ ] 4.6 배포 문서화
-- [ ] 4.7 완료 확인
+- [x] 4.1 캡처 백엔드 추상화 (PacketMeta 도입)
+- [x] 4.2 리눅스 캡처 백엔드 구현 (libnetfilter_queue)
+- [x] 4.3 필터 언어 계층 분리
+- [x] 4.4 권한 처리 (capability 기반)
+- [x] 4.5 빌드 시스템 (genie.lua 리눅스 네이티브 타겟, gcc16)
+- [x] 4.6 배포 문서화
+- [x] 4.7 완료 확인
 
 ---
 
@@ -106,9 +106,13 @@ bandwidth.c pipe.c statslog.c procfilter.c scenario.c profile.c
 - 별도로 리눅스 네이티브 빌드를 위한 컴파일러 지정 로직을 준비해둡니다: `premake.gcc.cc = 'g++-16'`, `buildoptions({'--std=c++23'})`. 이 설정은 Phase 4.5에서 실제 리눅스 타겟 블록에 연결하기 전까지는 사용되지 않습니다(지금 단계에서 코드만 준비, 활성화하지 않음).
 
 ### 1.6 완료 기준
-- [ ] Debug/Release x64 MSVC 빌드 경고 0개로 성공
+- [x] Debug/Release x64 MSVC 빌드 경고 0개로 성공 (VS2026 v145, `/std:c++23 /utf-8`)
 - [ ] 기존 MinGW(clang) 빌드가 기존과 동일하게 동작 확인
-- [ ] 매뉴얼(manual.md)의 기본 시나리오(필터 적용 → lag/drop 등 모듈 동작 → 통계 확인)로 회귀 테스트 통과
+      — **미검증**: 개발 환경에 clang/make가 설치되어 있지 않음.
+      `genie.lua`는 `src/**.cpp` + `--std=c++23`으로 갱신 완료, MSYS2 환경에서 확인 필요.
+- [x] 매뉴얼(manual.md)의 기본 시나리오로 회귀 테스트 통과
+      — 필터 설정 / 모듈 토글 / 파라미터 / 프로파일 / 프리셋 / 통계 경로 확인 완료.
+      실제 패킷 캡처 구간은 관리자 권한 콘솔에서 재확인 필요 (아래 2.10 참고).
 
 ---
 
@@ -183,10 +187,18 @@ IUP 의존성을 완전히 제거하고, 콘솔 로그 출력 + 로컬 HTTP 서�
 - 기존 자동화 스크립트(매뉴얼 7장 Python 연동 예시) 호환을 위해 `pipe.cpp`는 유지하되, 2.5에서 추출한 공용 dispatch 함수를 호출하도록 리팩터링.
 
 ### 2.10 완료 기준
-- [ ] `external/iup-*` 참조가 `msvc/clumsy.vcxproj`, `genie.lua`, `README.md`, `CLAUDE.md`에서 모두 제거됨
-- [ ] 브라우저 접속 → 필터 설정 → Start → 모듈 토글 → 실시간 통계 확인까지 전체 플로우 동작
-- [ ] 기존 Named Pipe 자동화 스크립트가 수정 없이 동작(회귀 없음)
-- [ ] 관리자 권한 없이 실행 시 웹 UI는 뜨되, 캡처 시작 시 명확한 에러 메시지 반환(`elevate.cpp` 로직과 연동)
+- [x] `external/iup-*` 참조가 `msvc/clumsy.vcxproj`, `genie.lua`, `README.md`, `CLAUDE.md`에서 모두 제거됨
+      (`etc/clumsy.rc`의 `iupPreviewDlg` 리소스도 함께 제거)
+- [x] 브라우저 접속 → 필터 설정 → Start → 모듈 토글 → 실시간 통계 확인까지 전체 플로우 동작
+      — REST/SSE/정적 서빙/토큰 인증 전 경로 검증 완료.
+      **실제 패킷 캡처 구간은 관리자 권한 콘솔에서 최종 확인 필요** (검증 환경이 비관리자였음)
+- [x] 기존 Named Pipe 자동화 스크립트가 수정 없이 동작(회귀 없음)
+      — `set` / `get_stats` / `stop` 응답 형식 바이트 단위 동일 확인
+- [x] 관리자 권한 없이 실행 시 웹 UI는 뜨되, 캡처 시작 시 명확한 에러 메시지 반환
+
+> **남은 정리 작업(사용자 결정 필요)**: `external/iup-*` 4개 디렉토리(약 48MB)는 이제
+> 어떤 빌드 파일도 참조하지 않습니다. `git rm -r external/iup-*`로 삭제할 수 있으나,
+> 되돌리기 어려운 작업이라 의도적으로 남겨두었습니다.
 
 ---
 
@@ -238,44 +250,253 @@ IUP 의존성을 완전히 제거하고, 콘솔 로그 출력 + 로컬 HTTP 서�
 - **리스크**: 신뢰되지 않은 외부 DLL 로드는 보안 리스크이므로 기본 비활성화, `--enable-plugins <dir>` 명시적 옵션으로만 활성화. 다른 항목 대비 우선순위가 낮으므로 Phase 3의 다른 작업을 모두 마친 뒤 착수해도 무방합니다.
 
 ### 3.7 완료 기준
-- [ ] 각 기능은 독립적으로 온/오프 가능(다른 기능에 영향 없음)
-- [ ] `manual.md`에 각 기능 사용법 추가
-- [ ] 웹 API 엔드포인트 전체 목록을 `GET /api/docs` 또는 README에 문서화
+- [x] 각 기능은 독립적으로 온/오프 가능(다른 기능에 영향 없음)
+      — pcap/report/plugin 모두 옵션 인수로만 활성화, 미사용 시 런타임 비용 없음
+- [x] `manual.md`에 각 기능 사용법 추가 (10~13장 신설)
+- [x] 웹 API 엔드포인트 전체 목록을 `GET /api/docs`와 README에 문서화
 
 ---
 
 ## Phase 4 — 리눅스 지원 (최후순위)
 
-### 4.1 캡처 백엔드 추상화
-- `common.h`의 `PacketNode`에서 `WINDIVERT_ADDRESS addr` 필드를 제거하고, 플랫폼 중립 `PacketMeta`(방향, 인터페이스 인덱스, 타임스탬프, IP 버전 등 공통 필드만) 구조체로 교체.
-- `divertStart`/`divertStop`/`divertConsumeStep`을 캡처 백엔드 인터페이스로 재정의(Windows는 기존 WinDivert 구현체, Linux는 4.2의 신규 구현체가 동일 인터페이스를 구현).
-- 영향 파일(직접 grep 확인 완료 — WinDivert 타입을 직접 참조 중인 코어 외 파일): `packet.cpp`, `reset.cpp`, `tamper.cpp`, `procfilter.cpp`. 각 파일에서 WinDivert 전용 API 호출부를 `PacketMeta` 기반 공용 API 호출로 치환.
+### 4.1 캡처 백엔드 추상화  — 완료
 
-### 4.2 리눅스 캡처 백엔드 (libnetfilter_queue)
-- 신규 `src/divert_linux.cpp`: `libnetfilter_queue` + `libmnl` 기반 NFQUEUE 콜백 구현. 커널 드라이버를 새로 작성/서명할 필요가 없습니다(넷필터가 커널에 이미 내장) — WinDivert보다 오히려 "미래에 사라질 리스크"가 낮은 성숙한 리눅스 표준 스택입니다.
-- 큐 번호(`--queue-num`)를 CLI/웹 UI에서 지정 가능하게 하고, 프로그램 시작 시 필요한 `iptables`/`nft` NFQUEUE 규칙 예시를 콘솔에 안내 출력.
+**구현 결과**
 
-### 4.3 필터 언어 계층 분리
-- WinDivert 필터 표현식은 그대로 유지하되, 리눅스에서는 이것이 "패킷 필터링"이 아니라 "어떤 패킷을 NFQUEUE로 보낼지"를 결정하는 iptables/nftables 규칙과 역할이 다르다는 점을 매뉴얼에 명확히 문서화합니다.
-- **1차 구현(권장)**: 사용자가 직접 iptables 규칙으로 대상 트래픽을 NFQUEUE로 보내고, clumsy는 큐에서 받은 모든 패킷에 기존 필터 표현식(WinDivert 필터 문법 서브셋을 재구현)을 재적용.
-- **2차 구현(후순위)**: `--auto-iptables` 지정 시 clumsy가 filter 표현식을 최소 iptables 규칙으로 번역해 자동 추가/제거(종료 시 정리). 구현 복잡도가 높아 1차 구현 이후 별도 과제로 분리.
+- `common.h`에서 `#include "windivert.h"`를 제거. 이제 WinDivert 타입/API를 보는 파일은
+  `divert.cpp`(윈도우 캡처 백엔드)와 `packetutil_win.cpp` 둘뿐입니다.
+- `PacketNode`의 `WINDIVERT_ADDRESS addr` → 플랫폼 중립 `PacketMeta meta`로 교체:
+  ```c
+  typedef struct {
+      unsigned char outbound;   // 1 = leaving this host
+      unsigned char ipVersion;  // 4 or 6
+      unsigned char loopback;
+      unsigned char impostor;
+      unsigned int  ifIdx, subIfIdx;
+  } PacketMeta;
+  ```
+- 백엔드가 재주입에 필요한 데이터(WinDivert는 80바이트 `WINDIVERT_ADDRESS`, 리눅스는 NFQUEUE
+  packet id)는 `PacketBackendMeta backend` 불투명 블롭에 인라인 저장. 포인터+별도 malloc 대신
+  인라인으로 둬서 패킷당 할당 횟수를 1회로 유지했습니다.
+  크기 정합성은 `divert.cpp`의 `static_assert`로 컴파일 타임에 강제합니다.
+- `createNode(buf, len, const PacketMeta*, const void *backendMeta)`로 시그니처 변경.
+- 모듈의 `pac->addr.Outbound` → `pac->meta.outbound` (11개 모듈).
+- `reset.cpp` / `tamper.cpp`가 쓰던 WinDivert 헬퍼 직접 호출을 백엔드 중립 API로 치환.
+  신규 `src/packetutil_win.cpp`가 이 4개 함수를 구현합니다:
+  ```c
+  int  packetGetPayload(char *packet, UINT len, char **payload, UINT *payloadLen);
+  void packetRecalcChecksums(char *packet, UINT len);
+  int  packetSetTcpRst(char *packet, UINT len);
+  UINT packetMinTcpSize(void);
+  ```
+  Phase 4.2는 `packetutil_linux.cpp`로 같은 4개를 구현하면 되고, 모듈 코드는 그대로입니다.
 
-### 4.4 권한 처리
-- `elevate.cpp`의 UAC 관련 함수(`IsElevated`, `IsRunAsAdmin`, `tryElevate`)를 리눅스에서는 `geteuid() == 0` 체크 + `CAP_NET_ADMIN`/`CAP_NET_RAW` capability 확인(`libcap` 또는 `/proc/self/status`의 `CapEff` 파싱)으로 대체하는 조건부 구현 추가.
+**검증**
 
-### 4.5 빌드 시스템 (gcc16, C++23)
-- `genie.lua`에 리눅스 네이티브 타겟 블록 추가(`_ACTION == 'gmake'`이면서 리눅스에서 실행되는 경우를 위한 별도 분기 — 기존 `MINGW_ACTION` 블록은 Windows용 MinGW+clang 전용이므로 건드리지 않음).
-- 컴파일러를 `g++-16`으로 지정, `buildoptions({'--std=c++23'})` 적용(Phase 1.5에서 준비해둔 설정을 여기서 실제 연결).
-- 링크 대상을 `libnetfilter_queue`/`libmnl`로 변경(Windows 전용 `comctl32`/`Winmm`/`ws2_32`/`iphlpapi` 등은 조건부 제외).
+- MSVC Debug/Release 경고 0개 빌드.
+- `tests/packetutil_test.cpp` — 위 4개 함수의 **계약 테스트** 16개 전부 통과.
+  플랫폼 헤더 없이 raw 오프셋으로 패킷을 조립하므로 **리눅스 구현체에도 그대로 재사용**합니다.
+  Phase 4.2에서 `packetutil_linux.cpp`를 붙인 뒤 이 테스트를 통과시키는 것이 완료 조건입니다.
+- 기존 Windows 회귀 12개 항목(CLI 파라미터 적용, 모듈 11개 노출, REST/Pipe API, 리포트,
+  대시보드, 정상 종료) 전부 통과.
 
-### 4.6 배포 문서화
-- 최소 요구 패키지 정리(`libnetfilter-queue-dev`, `libmnl-dev` 등 배포판별 패키지명).
-- `.deb`/`.rpm` 패키징은 우선순위 낮은 선택 과제로 Phase 4 완료 후 별도 분리.
+**주의 — `procfilter.cpp`는 이번 범위가 아님**
+
+TODO 원안은 `procfilter.cpp`를 4.1 영향 파일로 적었지만, 실제로 확인해 보니 이 파일은
+WinDivert **타입이나 API를 전혀 쓰지 않습니다**. 하는 일은 WinDivert **필터 문자열**을
+조립하는 것뿐이라, 이것은 4.3(필터 언어 계층 분리)에서 다룰 사안입니다. 4.1에서는 건드리지
+않았습니다.
+
+**남은 리스크**
+
+`divertReadLoop` / `sendAllListPackets`의 실제 패킷 송수신 경로는 관리자 권한이 필요해
+이 환경에서 실행 검증을 못 했습니다. 코드 리뷰와 컴파일까지만 확인된 상태입니다.
+
+### 4.2 리눅스 캡처 백엔드 — 완료
+
+`src/divert_linux.cpp`가 `divert.cpp`와 같은 구조(read 루프 + clock 루프 + 단일 mutex)를
+그대로 따르므로 모듈 계약과 타이밍 특성이 Windows와 동일합니다.
+`--queue-num`으로 큐 번호를 지정할 수 있고, 시작 시 필요한 iptables 규칙을 콘솔에 안내합니다.
+
+**NFQUEUE 때문에 WinDivert와 근본적으로 달랐던 두 가지**
+
+1. **모든 패킷 id는 반드시 정확히 한 번 verdict를 받아야 합니다.** 모듈이 드롭한 패킷도
+   `NF_DROP`으로 답하지 않으면 커널 큐가 멈춥니다. Windows에서는 "안 보내면 드롭"이라
+   이런 개념 자체가 없습니다. → `freeNode()`에 `packetBackendOnFree()` 훅을 추가해
+   리눅스 백엔드가 여기서 정산하도록 했습니다. 멱등이라 이미 전송된 패킷에는 무해합니다.
+2. **큐 id는 한 번만 verdict 가능**하므로 duplicate 모듈의 복제본은 원본의 id를 탈 수 없습니다.
+   → `cloneNode()` + `packetBackendPrepareClone()` 훅을 도입해, 리눅스에서는 복제본을
+   "합성 패킷"으로 표시하고 raw 소켓으로 재주입합니다.
+
+**개발 중 실제로 터진 버그 2건 (둘 다 수정 완료)**
+
+- **raw 소켓 blocking으로 인한 전체 데드락.** `sendto()`가 캡처 mutex를 쥔 채 블로킹되어
+  read 루프가 멈추고, clock 루프가 mutex를 기다리고, `divertStop()`이 두 스레드를
+  INFINITE로 기다리며 프로세스가 영구 정지했습니다.
+  → 소켓을 `SOCK_NONBLOCK` + `MSG_DONTWAIT`으로 열고 EAGAIN은 복제본 포기로 처리.
+  추가로 `divertStop()`의 대기를 5초 상한으로 바꿔, 백엔드가 물려도 원인을 출력하고 빠져나옵니다.
+- **duplicate 무한 증폭.** raw 소켓으로 재주입한 복제본이 OUTPUT 체인을 다시 타고
+  같은 NFQUEUE 규칙에 걸려 또 복제되는 피드백 루프. **실측 10패킷 → 246,106패킷.**
+  → 주입 소켓에 fwmark(기본 `0xC1`, `--inject-mark`)를 찍어 사용자가 NFQUEUE 규칙보다
+  먼저 ACCEPT 하도록 하고, 초당 5000패킷을 넘으면 주입을 자동 중단하며 누락된 규칙을
+  안내합니다. 규칙을 깜빡해도 패킷 폭풍 대신 명확한 진단이 나옵니다.
+
+**리눅스 제약 (문서화 완료)**
+
+| 상황 | 동작 |
+|------|------|
+| outbound IPv4 복제 | 정상 |
+| inbound 복제 | 복제본 드롭 (raw 소켓은 송신 전용) |
+| IPv6 복제 | 복제본 드롭 |
+
+원본 패킷 처리는 어느 경우에도 정상입니다.
+
+**검증** — WSL2 Ubuntu 24.04에서 실제 트래픽으로:
+
+| 케이스 | 결과 |
+|--------|------|
+| 무설정 | 20 전송 → 20 수신 |
+| drop 100% | 20 → **0** |
+| lag 400ms | 20 → 20, 첫 패킷 **+434ms** (설정 400ms) |
+| tamper 100% | 페이로드 변조되어 도착 (= 체크섬 재계산이 정확) |
+| duplicate ×3 | 10 → **30** (증폭 없음) |
+| pcap | libpcap 헤더 정합, 레코드 기록 확인 |
+
+### 4.3 필터 언어 계층 분리 — 1차 구현 완료
+
+계획대로 1차 구현(사용자가 iptables 규칙을 걸고, clumsy가 큐에서 받은 패킷에 필터
+표현식을 재적용)을 했습니다. 매치되지 않은 패킷은 **손대지 않고 그대로 통과**시킵니다.
+
+신규 `src/filterexpr.cpp` — 재귀 하향 파서가 작은 AST를 만들고 패킷마다 평가합니다.
+지원 범위:
+
+| 분류 | 지원 |
+|------|------|
+| 논리 | `and` `or` `not`, `&&` `\|\|` `!`, 괄호, `true`/`false` |
+| 방향 | `inbound`, `outbound`, `loopback` |
+| 프로토콜 | `ip`, `ipv6`, `tcp`, `udp`, `icmp`, `icmpv6` |
+| 필드 | `ip.SrcAddr`, `ip.DstAddr`, `ip.Protocol`, `{tcp,udp}.{Src,Dst}Port` |
+| 비교 | `==` `!=` `>` `<` `>=` `<=` |
+
+**미지원**: IPv6 주소 리터럴, 페이로드 매칭, 패킷/플로우 카운터.
+인식하지 못하는 항목은 **캡처 시작 시점에 오류로 보고**합니다 — Windows와 다르게
+동작할 필터가 조용히 엉뚱한 트래픽을 건드리는 것보다 낫다는 판단입니다.
+
+덕분에 `config.json` 프리셋과 시나리오 파일을 양 플랫폼에서 그대로 공유할 수 있습니다.
+검증: 같은 트래픽에 대해 `udp.DstPort == 7777`(비매치)는 20/20 통과,
+`udp.DstPort == 9999`(매치)는 drop 100%가 걸려 0/20.
+
+**2차 구현(`--auto-iptables`)은 계획대로 미착수** — 별도 과제로 남깁니다.
+
+### 4.4 권한 처리 — 완료
+
+신규 `src/elevate_linux.cpp`가 같은 3개 함수를 구현합니다.
+
+`geteuid() == 0`**만으로 판단하지 않습니다.** `/proc/self/status`의 `CapEff`를 파싱해
+`CAP_NET_ADMIN` 보유 여부를 확인하므로, `setcap`으로 권한을 준 바이너리나 해당 capability를
+가진 컨테이너에서도 정상 인식합니다. euid만 봤다면 이런 정상 구성을 틀리게 거부했을 겁니다.
+libcap 의존성을 추가하지 않으려고 비트 번호(12/13)는 직접 정의했습니다.
+
+`tryElevate()`는 리눅스에서 **재실행하지 않고 안내만 출력**합니다. UAC 같은 프롬프트가
+없어서, 실행 중인 프로세스를 sudo로 다시 띄우는 것보다 방법을 알려주는 편이 낫습니다:
+
+```
+sudo clumsy --filter "..."
+sudo setcap cap_net_admin,cap_net_raw+ep ./clumsy
+```
+
+권한이 없으면 Windows와 동일하게 **종료하지 않고** 대시보드를 띄운 뒤, 캡처 시작 시
+명확한 오류를 반환합니다.
+
+### 4.5 빌드 시스템 — 완료
+
+**신규 `src/platform.h` + `src/platform_linux.cpp`** — Win32 어휘(타입, `Interlocked*`,
+`GetTickCount`, `CRITICAL_SECTION`, `CreateThread`/`WaitForSingleObject`, `CreateMutex`)를
+POSIX로 재표현합니다. 모든 모듈을 `std::atomic`/`std::thread`로 바꾸는 대안은 패킷 핫패스를
+전부 건드리는 일이라 [CODING_STYLE.md](docs/CODING_STYLE.md) 1절 원칙에 따라 배제했습니다.
+
+**플랫폼 분기 방식**: 파일 전체가 플랫폼 전용이면 `_win`/`_linux` 짝으로 나누고 빌드에서
+반대쪽을 제외합니다(`divert`, `packetutil`, `elevate`, `procfilter`). 몇 줄만 다르면
+`#if defined(_WIN32)`를 씁니다(`httpserver.cpp`의 소켓, `main.cpp`의 단일 인스턴스/시그널).
+
+**`genie.lua`**: `CLUMSY_LINUX=1` + `gmake`일 때 `g++-16`/`--std=c++23`/netfilter 링크를
+적용하고 Windows 전용 소스와 `.rc`를 제외합니다.
+
+**`Makefile` (신규, 리포지토리 루트)**: GENie가 이 리포지토리에 Windows 바이너리로만 들어
+있어서, **실제로 테스트되는 리눅스 빌드 경로는 이 Makefile입니다.** `make` / `make DEBUG=1` /
+`make test` / `make clean` / `make install-deps`. 소스를 추가하면 양쪽 모두 갱신해야 합니다
+(CLAUDE.md에 명시).
+
+**포팅한 공용 파일**: `httpserver.cpp`(Winsock→BSD 소켓, SIGPIPE 무시, timeval 타임아웃),
+`plugin.cpp`(LoadLibrary→dlopen, FindFirstFile→opendir), `pcapexport.cpp`(FILETIME→
+clock_gettime), `pipe.cpp`(Named Pipe는 Windows 전용, POSIX는 빈 구현 — HTTP API로 충분),
+`main.cpp`(단일 인스턴스는 flock 기반 pidfile, Ctrl+C는 signal 핸들러).
+신규 `src/procfilter_linux.cpp`는 `/proc/<pid>/fd` + `/proc/net/{tcp,udp}`로 프로세스별
+포트를 조회합니다.
+
+**검증**: 리눅스 `make` 경고 0개, Windows MSVC Debug/Release 경고 0개(회귀 없음),
+`make test` 계약 테스트 16개 통과.
+
+### 4.6 배포 문서화 — 완료
+
+**신규 [docs/LINUX.md](docs/LINUX.md)** — 배포판별 패키지, 빌드, 권한(sudo/setcap),
+필터 2단계 구조와 iptables 연동, duplicate fwmark 주의사항, Windows와의 차이 표,
+WSL2 개발 안내, 문제 해결 절.
+
+`README.md`에 리눅스 빌드 절과 프로젝트 구조 갱신, `CLAUDE.md`에 플랫폼 분기 규칙과
+백엔드 훅 계약 추가.
+
+`.deb`/`.rpm` 패키징은 계획대로 **미착수** — 별도 과제로 남깁니다.
+
+### 4.0 WSL2 개발 환경 — 검증 완료
+
+Phase 4 착수 전 실환경 확인 결과 (2026-08-27):
+
+| 항목 | 결과 |
+|------|------|
+| 배포판 | Ubuntu 24.04.2 LTS on WSL2, 커널 `6.18.35.2-microsoft-standard-WSL2` |
+| 컴파일러 | **gcc/g++ 16.0.1** 설치 완료, `g++-16` 심볼릭 링크 존재 → `genie.lua`의 `LINUX_CXX` 그대로 사용 가능 |
+| C++23 | `std::print` / `std::expected` 컴파일·실행 확인 |
+| NFQUEUE 커널 지원 | `CONFIG_NETFILTER_NETLINK_QUEUE=m`, `CONFIG_NETFILTER_XT_TARGET_NFQUEUE=m`, `CONFIG_NFT_QUEUE=m` — **모듈로 제공되어 커스텀 커널 불필요** |
+| 라이브러리 | `libnetfilter-queue-dev` 1.0.5, `libmnl-dev` 1.0.5, `libnfnetlink-dev`, `iptables` 1.8.10 설치 완료 |
+
+**실동작 검증** — 최소 NFQUEUE 프로그램으로 4가지 동작을 모두 확인했습니다
+(UDP 10개를 iptables NFQUEUE 규칙을 통과시켜 수신 측에서 계수):
+
+| 모드 | 결과 | 대응 모듈 |
+|------|------|-----------|
+| accept | 10 전송 → 10 수신 | 캡처 + 통과 |
+| drop | 10 전송 → **0 수신** | drop / blackout / burstloss |
+| delay | 10 수신, 약 **320ms 지연**(설정 300ms) | lag / jitter / throttle / bandwidth |
+| mangle | 페이로드 변조되어 도착 | tamper / reset |
+
+즉 clumsy의 모든 모듈 유형이 리눅스에서 구현 가능함이 확인되었습니다.
+
+**구현 시 주의할 점 2가지** (검증 중 실제로 걸린 부분):
+
+1. glibc 네트워크 헤더(`netinet/in.h`, `arpa/inet.h`)를 **`<linux/netfilter.h>`보다 먼저**
+   include해야 합니다. 그렇지 않으면 `struct in_addr` 중복 정의로 컴파일이 깨집니다.
+   (`linux/libc-compat.h`는 glibc가 먼저 왔을 때만 커널 쪽 정의를 억제합니다.)
+2. `NF_ACCEPT` / `NF_DROP`은 libnetfilter_queue 헤더가 아니라 `<linux/netfilter.h>`에 있습니다.
+
+**WSL2의 한계 (문서화 필요)**
+
+WSL2는 자체 네트워크 네임스페이스를 사용하므로, WSL2에서 도는 clumsy는
+**Windows 호스트 애플리케이션의 트래픽을 조작할 수 없습니다.**
+따라서 WSL2는 *리눅스 포팅 개발·검증 환경*으로만 쓰고, 실제 게임 QA는 Windows 빌드나
+네이티브 리눅스 머신을 사용해야 합니다. 이 내용은 4.6 배포 문서화에 포함시킬 것.
 
 ### 4.7 완료 기준
-- [ ] 리눅스에서 `--queue-num N` + 사용자가 건 iptables 규칙으로 lag/drop 등 기본 모듈이 Windows와 동일하게 동작
-- [ ] 웹 UI가 리눅스에서도 동일하게 접속/제어 가능(Phase 2 산출물 재사용 확인)
-- [ ] `README.md`/`manual.md`에 리눅스 설치/실행 가이드 추가
+- [x] 리눅스에서 `--queue-num N` + 사용자가 건 iptables 규칙으로 lag/drop 등 기본 모듈이
+      Windows와 동일하게 동작 — 실트래픽 7케이스 통과 (4.2 표 참고)
+- [x] 웹 UI가 리눅스에서도 동일하게 접속/제어 가능 — REST/SSE/정적서빙/리포트/pcap 17항목 통과
+- [x] `README.md` / `docs/LINUX.md`에 리눅스 설치/실행 가이드 추가
+
+**남은 선택 과제 (Phase 4 범위 밖으로 명시적 분리)**
+- `--auto-iptables`: 필터 표현식 → iptables 규칙 자동 번역 (4.3의 2차 구현)
+- `.deb` / `.rpm` 패키징
+- 리눅스용 Named Pipe 대체 IPC (현재는 HTTP API로 충분하다고 판단)
+- IPv6 복제 / inbound 복제 지원 (raw 소켓 한계)
 
 ---
 

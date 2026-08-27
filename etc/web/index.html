@@ -1,0 +1,628 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>clumsy dashboard</title>
+<!--
+  Phase 2.7 / 3.5 — single self-contained dashboard.
+
+  No build step, no CDN, no framework: clumsy has to work on an air-gapped test
+  bench, so everything (styles, script, the throughput chart) lives in this one
+  file and is served from disk next to clumsy.exe.
+
+  The module forms are not hardcoded. They are generated from the ParamSpec
+  metadata that GET /api/modules returns, so a new module needs no change here.
+-->
+<style>
+:root{
+  color-scheme:light dark;
+  --bg:#f6f6f9; --panel:#fff; --fg:#1b1b21; --muted:#6a6a78;
+  --line:#e3e3ec; --accent:#3b76d8; --ok:#2f9e5f; --warn:#d0663f; --err:#cc4444;
+  --mono:ui-monospace,SFMono-Regular,Consolas,"Liberation Mono",monospace;
+}
+@media (prefers-color-scheme:dark){
+  :root{ --bg:#141418; --panel:#1c1c22; --fg:#e7e7ee; --muted:#9494a4;
+         --line:#2c2c36; --accent:#6f9cf0; }
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);
+     font:14px/1.55 system-ui,-apple-system,"Segoe UI",sans-serif}
+header{display:flex;flex-wrap:wrap;align-items:center;gap:.75rem;
+       padding:.75rem 1.25rem;background:var(--panel);border-bottom:1px solid var(--line);
+       position:sticky;top:0;z-index:5}
+header h1{font-size:1rem;margin:0;font-weight:650;letter-spacing:.01em}
+header .ver{color:var(--muted);font-size:.8rem}
+.spacer{flex:1}
+main{max-width:76rem;margin:0 auto;padding:1.25rem;display:grid;gap:1.25rem}
+section{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:1rem 1.15rem}
+section > h2{margin:0 0 .75rem;font-size:.82rem;letter-spacing:.07em;
+             text-transform:uppercase;color:var(--muted);font-weight:650}
+label{display:block;font-size:.8rem;color:var(--muted);margin-bottom:.2rem}
+input[type=text],input[type=number],select,textarea{
+  width:100%;padding:.4rem .55rem;border:1px solid var(--line);border-radius:5px;
+  background:var(--bg);color:var(--fg);font:inherit}
+input[type=text].mono,textarea{font-family:var(--mono);font-size:.85rem}
+button{padding:.42rem .9rem;border:1px solid var(--line);border-radius:5px;
+       background:var(--bg);color:var(--fg);font:inherit;cursor:pointer}
+button:hover{border-color:var(--accent)}
+button.primary{background:var(--accent);border-color:var(--accent);color:#fff;font-weight:600}
+button.danger{border-color:var(--err);color:var(--err)}
+button:disabled{opacity:.5;cursor:not-allowed}
+.row{display:flex;flex-wrap:wrap;gap:.6rem;align-items:flex-end}
+.row > *{min-width:0}
+.grow{flex:1 1 18rem}
+.dot{width:.6rem;height:.6rem;border-radius:50%;display:inline-block;background:var(--muted)}
+.dot.on{background:var(--ok)}
+.dot.err{background:var(--err)}
+.cards{display:flex;flex-wrap:wrap;gap:.6rem}
+.card{border:1px solid var(--line);border-radius:6px;padding:.5rem .8rem;min-width:8rem;flex:1 1 8rem}
+.card span{display:block;font-size:.75rem;color:var(--muted)}
+.card b{font-size:1.25rem;font-variant-numeric:tabular-nums}
+#modules{display:grid;gap:.6rem}
+.mod{border:1px solid var(--line);border-radius:6px;padding:.6rem .8rem}
+.mod.on{border-color:var(--accent)}
+.mod-head{display:flex;align-items:center;gap:.6rem;flex-wrap:wrap}
+.mod-head b{font-size:.95rem}
+.mod-head .count{margin-left:auto;color:var(--muted);font-size:.8rem;
+                 font-variant-numeric:tabular-nums}
+.params{display:none;flex-wrap:wrap;gap:.55rem;margin-top:.6rem;
+        padding-top:.6rem;border-top:1px dashed var(--line)}
+.mod.on .params{display:flex}
+.param{flex:0 0 auto;min-width:7rem}
+.param.wide{min-width:13rem}
+.switch{display:inline-flex;align-items:center;gap:.35rem;cursor:pointer;font-size:.85rem;color:var(--fg)}
+.muted{color:var(--muted)}
+.small{font-size:.8rem}
+#status{padding:.45rem .7rem;border-radius:5px;background:var(--bg);
+        border:1px solid var(--line);font-size:.85rem;min-height:2rem}
+#status.err{border-color:var(--err);color:var(--err)}
+#chart{width:100%;height:150px;display:block}
+details summary{cursor:pointer;color:var(--muted);font-size:.85rem;
+                margin-bottom:.5rem;user-select:none}
+.fb-grid{display:flex;flex-wrap:wrap;gap:.6rem;align-items:flex-end}
+.fb-out{margin-top:.7rem}
+@media (max-width:640px){ main{padding:.75rem} section{padding:.8rem} }
+</style>
+</head>
+<body>
+
+<header>
+  <span class="dot" id="liveDot" title="stream connection"></span>
+  <h1>clumsy</h1>
+  <span class="ver" id="version"></span>
+  <span class="spacer"></span>
+  <span class="small muted" id="adminNote"></span>
+  <a class="small" href="/api/report" download>Download report</a>
+  <a class="small" href="/api/docs" target="_blank" rel="noopener">API</a>
+</header>
+
+<main>
+
+  <section>
+    <h2>Capture</h2>
+    <div class="row">
+      <div class="grow">
+        <label for="filter">WinDivert filter expression</label>
+        <input type="text" id="filter" class="mono" placeholder="udp and outbound" autocomplete="off">
+      </div>
+      <div style="flex:0 1 14rem">
+        <label for="preset">Preset</label>
+        <select id="preset"><option value="">— choose —</option></select>
+      </div>
+      <div style="flex:0 1 11rem">
+        <label for="process">Process (optional)</label>
+        <input type="text" id="process" placeholder="game.exe" autocomplete="off">
+      </div>
+      <button class="primary" id="startBtn">Start</button>
+      <button class="danger" id="stopBtn">Stop</button>
+    </div>
+    <p class="small muted" style="margin:.6rem 0 .4rem">
+      Capturing localhost traffic cannot match inbound: write
+      <code>udp and outbound</code>, not <code>udp</code>.
+    </p>
+    <div id="status">…</div>
+
+    <details style="margin-top:.9rem">
+      <summary>Filter builder — compose an expression without memorising the syntax</summary>
+      <div class="fb-grid">
+        <div style="flex:0 1 8rem">
+          <label for="fbProto">Protocol</label>
+          <select id="fbProto">
+            <option value="">any</option>
+            <option value="tcp">TCP</option>
+            <option value="udp">UDP</option>
+            <option value="icmp">ICMP</option>
+          </select>
+        </div>
+        <div style="flex:0 1 9rem">
+          <label for="fbDir">Direction</label>
+          <select id="fbDir">
+            <option value="">both</option>
+            <option value="outbound">outbound</option>
+            <option value="inbound">inbound</option>
+          </select>
+        </div>
+        <div style="flex:0 1 9rem">
+          <label for="fbPort">Port (or a-b)</label>
+          <input type="text" id="fbPort" placeholder="7777 or 7770-7780" autocomplete="off">
+        </div>
+        <div style="flex:0 1 11rem">
+          <label for="fbIp">Remote IPv4</label>
+          <input type="text" id="fbIp" placeholder="198.51.100.1" autocomplete="off">
+        </div>
+        <label class="switch" style="flex:0 0 auto;margin-bottom:.45rem">
+          <input type="checkbox" id="fbLoopback"> loopback only
+        </label>
+      </div>
+      <div class="fb-out row">
+        <div class="grow">
+          <label for="fbResult">Generated expression</label>
+          <input type="text" id="fbResult" class="mono" readonly>
+        </div>
+        <button id="fbUse">Use this</button>
+        <button id="fbSave">Save as preset…</button>
+      </div>
+    </details>
+  </section>
+
+  <section>
+    <h2>Live statistics</h2>
+    <div class="cards">
+      <div class="card"><span>Captured</span><b id="sCaptured">0</b></div>
+      <div class="card"><span>Sent</span><b id="sSent">0</b></div>
+      <div class="card"><span>Packets / sec</span><b id="sPps">0</b></div>
+      <div class="card"><span>Elapsed</span><b id="sElapsed">0s</b></div>
+      <div class="card"><span>Buffers (lag/jit/bw)</span><b id="sBuffers">0/0/0</b></div>
+    </div>
+    <canvas id="chart" width="900" height="150" aria-label="captured packets per second"></canvas>
+  </section>
+
+  <section>
+    <h2>Modules</h2>
+    <div id="modules"></div>
+  </section>
+
+  <section>
+    <h2>Profiles, scenario and capture file</h2>
+    <div class="row">
+      <div style="flex:0 1 14rem">
+        <label for="profile">Profile</label>
+        <select id="profile"><option value="">— choose —</option></select>
+      </div>
+      <button id="applyProfile">Apply</button>
+      <div style="flex:0 1 12rem">
+        <label for="profileName">Save current as</label>
+        <input type="text" id="profileName" placeholder="mobile-4g" autocomplete="off">
+      </div>
+      <button id="saveProfile">Save</button>
+    </div>
+    <div class="row" style="margin-top:.8rem">
+      <div style="flex:0 1 18rem">
+        <label for="scenarioPath">Scenario file</label>
+        <input type="text" id="scenarioPath" class="mono" placeholder="scenario-example.json" autocomplete="off">
+      </div>
+      <button id="scenarioLoad">Load</button>
+      <button id="scenarioStart">Start</button>
+      <button id="scenarioStop">Stop</button>
+      <span class="small muted" id="scenarioInfo"></span>
+    </div>
+    <div class="row" style="margin-top:.8rem">
+      <div style="flex:0 1 18rem">
+        <label for="pcapPath">pcap output file</label>
+        <input type="text" id="pcapPath" class="mono" placeholder="clumsy.pcap" autocomplete="off">
+      </div>
+      <button id="pcapStart">Start dump</button>
+      <button id="pcapStop">Stop dump</button>
+      <span class="small muted" id="pcapInfo"></span>
+    </div>
+  </section>
+
+</main>
+
+<script>
+"use strict";
+
+// Token comes from the URL when clumsy is bound to a non-loopback address.
+const TOKEN = new URLSearchParams(location.search).get("token") || "";
+
+function api(path, options) {
+  const opts = Object.assign({ headers: {} }, options || {});
+  opts.headers["X-Clumsy-Token"] = TOKEN;
+  if (opts.body) opts.headers["Content-Type"] = "application/json";
+  return fetch(path, opts).then(async r => {
+    let data = null;
+    try { data = await r.json(); } catch (e) { /* non-JSON body */ }
+    if (!r.ok) throw new Error((data && data.message) || (r.status + " " + r.statusText));
+    return data;
+  });
+}
+
+const $ = id => document.getElementById(id);
+
+function setStatus(text, isError) {
+  const el = $("status");
+  el.textContent = text;
+  el.classList.toggle("err", !!isError);
+}
+
+function fail(err) { setStatus(err.message || String(err), true); }
+
+// ---------------------------------------------------------------------------
+// Modules — forms are generated from ParamSpec, so this code never names a
+// module or a parameter.
+// ---------------------------------------------------------------------------
+
+let moduleCache = [];
+
+function paramInput(mod, spec, currentValue) {
+  const wrap = document.createElement("div");
+  wrap.className = "param" + (spec.label.length > 16 ? " wide" : "");
+
+  if (spec.type === "action") {
+    const btn = document.createElement("button");
+    btn.textContent = spec.label;
+    btn.onclick = () => postModule(mod.shortName, { [spec.key]: true }).catch(fail);
+    wrap.appendChild(btn);
+    return wrap;
+  }
+
+  if (spec.type === "bool") {
+    const lab = document.createElement("label");
+    lab.className = "switch";
+    const cb = document.createElement("input");
+    cb.type = "checkbox";
+    cb.checked = currentValue === "true";
+    cb.onchange = () => postModule(mod.shortName, { [spec.key]: cb.checked }).catch(fail);
+    lab.appendChild(cb);
+    lab.appendChild(document.createTextNode(spec.label));
+    wrap.appendChild(lab);
+    return wrap;
+  }
+
+  const lab = document.createElement("label");
+  lab.textContent = spec.label;
+  lab.htmlFor = "p_" + spec.key;
+  const input = document.createElement("input");
+  input.type = "number";
+  input.id = "p_" + spec.key;
+  input.value = currentValue !== undefined ? currentValue : "";
+  input.min = spec.min;
+  input.max = spec.max;
+  input.step = (spec.type === "int") ? 1 : 0.1;
+  // commit on blur or Enter rather than per keystroke, so typing "100" does not
+  // momentarily apply 1 and then 10.
+  const commit = () => postModule(mod.shortName, { [spec.key]: input.value }).catch(fail);
+  input.onchange = commit;
+  input.onkeydown = e => { if (e.key === "Enter") { commit(); input.blur(); } };
+  wrap.appendChild(lab);
+  wrap.appendChild(input);
+  return wrap;
+}
+
+function postModule(shortName, body) {
+  return api("/api/modules/" + encodeURIComponent(shortName), {
+    method: "POST",
+    body: JSON.stringify(body)
+  });
+}
+
+function renderModules(mods) {
+  moduleCache = mods;
+  const host = $("modules");
+  host.textContent = "";
+
+  mods.forEach(mod => {
+    const box = document.createElement("div");
+    box.className = "mod" + (mod.enabled ? " on" : "");
+    box.dataset.name = mod.shortName;
+
+    const head = document.createElement("div");
+    head.className = "mod-head";
+
+    const toggleLabel = document.createElement("label");
+    toggleLabel.className = "switch";
+    const toggle = document.createElement("input");
+    toggle.type = "checkbox";
+    toggle.checked = !!mod.enabled;
+    toggle.onchange = () => {
+      box.classList.toggle("on", toggle.checked);
+      postModule(mod.shortName, { enabled: toggle.checked })
+        .then(() => setStatus(mod.displayName + (toggle.checked ? " enabled" : " disabled")))
+        .catch(fail);
+    };
+    toggleLabel.appendChild(toggle);
+    const name = document.createElement("b");
+    name.textContent = mod.displayName;
+    toggleLabel.appendChild(name);
+    head.appendChild(toggleLabel);
+
+    const count = document.createElement("span");
+    count.className = "count";
+    count.dataset.count = mod.shortName;
+    count.textContent = mod.affected + " affected";
+    head.appendChild(count);
+    box.appendChild(head);
+
+    const params = document.createElement("div");
+    params.className = "params";
+    (mod.paramSpecs || []).forEach(spec => {
+      params.appendChild(paramInput(mod, spec, mod.params[spec.key]));
+    });
+    box.appendChild(params);
+
+    host.appendChild(box);
+  });
+}
+
+function refreshModules() {
+  return api("/api/modules").then(d => renderModules(d.modules)).catch(fail);
+}
+
+// ---------------------------------------------------------------------------
+// Live stats via Server-Sent Events, with a polling fallback
+// ---------------------------------------------------------------------------
+
+const history = [];
+let lastCaptured = 0, lastStamp = 0;
+
+function drawChart() {
+  const c = $("chart");
+  const ctx = c.getContext("2d");
+  const dpr = window.devicePixelRatio || 1;
+  const w = c.clientWidth, h = c.clientHeight;
+  if (c.width !== w * dpr || c.height !== h * dpr) {
+    c.width = w * dpr; c.height = h * dpr;
+  }
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, w, h);
+
+  const css = getComputedStyle(document.documentElement);
+  const line = css.getPropertyValue("--line").trim() || "#ddd";
+  const accent = css.getPropertyValue("--accent").trim() || "#3b76d8";
+
+  ctx.strokeStyle = line;
+  ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.moveTo(0, h - .5); ctx.lineTo(w, h - .5); ctx.stroke();
+
+  if (history.length < 2) return;
+  const max = Math.max(1, ...history);
+  ctx.strokeStyle = accent;
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  history.forEach((v, i) => {
+    const x = (i / (history.length - 1)) * w;
+    const y = h - (v / max) * (h - 6) - 3;
+    i ? ctx.lineTo(x, y) : ctx.moveTo(x, y);
+  });
+  ctx.stroke();
+
+  ctx.fillStyle = css.getPropertyValue("--muted").trim() || "#888";
+  ctx.font = "11px system-ui, sans-serif";
+  ctx.fillText(max + " pkt/s", 4, 12);
+}
+
+function applyStats(s) {
+  $("sCaptured").textContent = s.captured;
+  $("sSent").textContent = s.sent;
+  $("sElapsed").textContent = Math.floor(s.elapsedMs / 1000) + "s";
+  $("sBuffers").textContent =
+    s.buffers.lag + "/" + s.buffers.jitter + "/" + s.buffers.bandwidth;
+
+  const now = Date.now();
+  if (lastStamp && now > lastStamp) {
+    const pps = Math.max(0, Math.round((s.captured - lastCaptured) * 1000 / (now - lastStamp)));
+    $("sPps").textContent = pps;
+    history.push(pps);
+    while (history.length > 180) history.shift();
+    drawChart();
+  }
+  lastCaptured = s.captured;
+  lastStamp = now;
+
+  Object.keys(s.modules).forEach(name => {
+    const el = document.querySelector('[data-count="' + name + '"]');
+    if (el) el.textContent = s.modules[name].affected + " affected";
+    const box = document.querySelector('.mod[data-name="' + name + '"]');
+    if (box) {
+      const cb = box.querySelector(".mod-head input[type=checkbox]");
+      // Do not fight the user mid-click; only sync when it actually differs.
+      if (cb && cb.checked !== s.modules[name].enabled) {
+        cb.checked = s.modules[name].enabled;
+        box.classList.toggle("on", cb.checked);
+      }
+    }
+  });
+
+  $("scenarioInfo").textContent = s.scenario.loaded
+    ? (s.scenario.steps + " steps" + (s.scenario.active ? ", running" : ", idle"))
+    : "no scenario loaded";
+  $("pcapInfo").textContent = s.pcap.active
+    ? (s.pcap.packets + " packets, " + Math.round(s.pcap.bytes / 1024) + " KB")
+    : "not recording";
+}
+
+function connectStream() {
+  const url = "/api/stream" + (TOKEN ? "?token=" + encodeURIComponent(TOKEN) : "");
+  const es = new EventSource(url);
+  es.addEventListener("stats", e => {
+    $("liveDot").className = "dot on";
+    try { applyStats(JSON.parse(e.data)); } catch (err) { /* partial frame */ }
+  });
+  es.onerror = () => {
+    $("liveDot").className = "dot err";
+    es.close();
+    // clumsy may be restarting; retry rather than leaving a dead page.
+    setTimeout(connectStream, 2000);
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Capture controls
+// ---------------------------------------------------------------------------
+
+function refreshStatus() {
+  return api("/api/status").then(s => {
+    $("version").textContent = "v" + s.version;
+    $("adminNote").textContent = s.admin ? "" : "not elevated — capture disabled";
+    $("startBtn").disabled = s.capturing;
+    $("stopBtn").disabled = !s.capturing;
+    if (s.filter && !$("filter").value) $("filter").value = s.filter;
+    if (s.process && !$("process").value) $("process").value = s.process;
+    setStatus(s.message || (s.capturing ? "Capturing." : "Idle."));
+  }).catch(fail);
+}
+
+$("startBtn").onclick = () => {
+  api("/api/filter", {
+    method: "POST",
+    body: JSON.stringify({ filter: $("filter").value, process: $("process").value })
+  }).then(refreshStatus).catch(fail);
+};
+
+$("stopBtn").onclick = () => {
+  api("/api/stop", { method: "POST" }).then(() => {
+    history.length = 0; lastStamp = 0; drawChart();
+    return refreshStatus();
+  }).catch(fail);
+};
+
+// ---------------------------------------------------------------------------
+// Presets, profiles, scenario, pcap
+// ---------------------------------------------------------------------------
+
+function refreshPresets() {
+  return api("/api/presets").then(d => {
+    const sel = $("preset");
+    sel.textContent = "";
+    sel.appendChild(new Option("— choose —", ""));
+    d.presets.forEach(p => sel.appendChild(new Option(p.name, p.filter)));
+  }).catch(fail);
+}
+
+$("preset").onchange = e => { if (e.target.value) $("filter").value = e.target.value; };
+
+function refreshProfiles() {
+  return api("/api/profiles").then(d => {
+    const sel = $("profile");
+    sel.textContent = "";
+    sel.appendChild(new Option("— choose —", ""));
+    d.profiles.forEach(n => sel.appendChild(new Option(n, n)));
+  }).catch(fail);
+}
+
+$("applyProfile").onclick = () => {
+  const name = $("profile").value;
+  if (!name) return;
+  api("/api/profiles/" + encodeURIComponent(name) + "/apply", { method: "POST" })
+    .then(() => { setStatus("Profile '" + name + "' applied."); return refreshModules(); })
+    .catch(fail);
+};
+
+$("saveProfile").onclick = () => {
+  const name = $("profileName").value.trim();
+  if (!name) return setStatus("Enter a profile name first.", true);
+  api("/api/profiles", { method: "POST", body: JSON.stringify({ name }) })
+    .then(() => { setStatus("Profile '" + name + "' saved."); return refreshProfiles(); })
+    .catch(fail);
+};
+
+$("scenarioLoad").onclick = () => {
+  const path = $("scenarioPath").value.trim();
+  if (!path) return setStatus("Enter a scenario file path first.", true);
+  api("/api/scenario/load", { method: "POST", body: JSON.stringify({ path }) })
+    .then(d => setStatus("Scenario loaded: " + d.steps + " steps."))
+    .catch(fail);
+};
+$("scenarioStart").onclick = () =>
+  api("/api/scenario/start", { method: "POST" })
+    .then(() => setStatus("Scenario started.")).catch(fail);
+$("scenarioStop").onclick = () =>
+  api("/api/scenario/stop", { method: "POST" })
+    .then(() => setStatus("Scenario stopped.")).catch(fail);
+
+$("pcapStart").onclick = () => {
+  const path = $("pcapPath").value.trim() || "clumsy.pcap";
+  api("/api/pcap/start", { method: "POST", body: JSON.stringify({ path }) })
+    .then(d => setStatus("Recording packets to " + d.path)).catch(fail);
+};
+$("pcapStop").onclick = () =>
+  api("/api/pcap/stop", { method: "POST" })
+    .then(d => setStatus("pcap closed after " + d.packets + " packets.")).catch(fail);
+
+// ---------------------------------------------------------------------------
+// Filter builder  (Phase 3.5) — pure client side, no server round trip
+// ---------------------------------------------------------------------------
+
+function portClause(proto, spec) {
+  const kinds = proto ? [proto] : ["tcp", "udp"];
+  const range = spec.split("-").map(s => s.trim()).filter(Boolean);
+  const parts = [];
+  kinds.forEach(k => {
+    ["DstPort", "SrcPort"].forEach(side => {
+      if (range.length === 2) {
+        parts.push("(" + k + "." + side + " >= " + range[0] +
+                   " and " + k + "." + side + " <= " + range[1] + ")");
+      } else {
+        parts.push(k + "." + side + " == " + range[0]);
+      }
+    });
+  });
+  return "(" + parts.join(" or ") + ")";
+}
+
+function buildFilter() {
+  const proto = $("fbProto").value;
+  const dir = $("fbDir").value;
+  const port = $("fbPort").value.trim();
+  const ip = $("fbIp").value.trim();
+  const loopback = $("fbLoopback").checked;
+  const parts = [];
+
+  if (proto) parts.push(proto);
+  if (dir) parts.push(dir);
+  if (loopback) parts.push("loopback");
+  if (port && /^[0-9]+(\s*-\s*[0-9]+)?$/.test(port)) parts.push(portClause(proto, port));
+  if (ip && /^[0-9.]+$/.test(ip)) {
+    parts.push("(ip.DstAddr == " + ip + " or ip.SrcAddr == " + ip + ")");
+  }
+
+  const expr = parts.length ? parts.join(" and ") : "outbound";
+  $("fbResult").value = expr;
+  return expr;
+}
+
+["fbProto", "fbDir", "fbPort", "fbIp", "fbLoopback"].forEach(id => {
+  $(id).addEventListener("input", buildFilter);
+  $(id).addEventListener("change", buildFilter);
+});
+
+$("fbUse").onclick = () => {
+  $("filter").value = buildFilter();
+  $("preset").value = "";
+  setStatus("Filter expression copied into the capture box.");
+};
+
+$("fbSave").onclick = () => {
+  const filter = buildFilter();
+  const name = prompt("Preset name:", "");
+  if (!name) return;
+  api("/api/presets", { method: "POST", body: JSON.stringify({ name, filter }) })
+    .then(() => { setStatus("Preset '" + name + "' saved to config.json."); return refreshPresets(); })
+    .catch(fail);
+};
+
+// ---------------------------------------------------------------------------
+// Boot
+// ---------------------------------------------------------------------------
+
+window.addEventListener("resize", drawChart);
+buildFilter();
+Promise.all([refreshStatus(), refreshModules(), refreshPresets(), refreshProfiles()])
+  .then(connectStream);
+// The SSE stream carries the live numbers; this only catches state that changes
+// without a stats frame (a profile applied over the pipe API, for instance).
+setInterval(refreshStatus, 5000);
+</script>
+</body>
+</html>

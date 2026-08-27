@@ -10,47 +10,103 @@
 
 - **Windows 7 / 8 / 10 / 11** (64비트 전용)
 - **관리자 권한 필수** — clumsy는 네트워크 드라이버를 로드하므로 반드시 관리자로 실행해야 합니다.
-  - clumsy를 처음 실행하면 권한 상승 창(UAC)이 자동으로 뜹니다. "예"를 누르면 됩니다.
+- 웹 대시보드를 볼 브라우저 (별도 설치 불필요, 로컬에서 동작)
 
 ### 실행 방법
 
-`clumsy.exe`를 더블클릭합니다. UAC 창이 뜨면 "예"를 클릭합니다.
+clumsy는 **콘솔 애플리케이션**입니다. **관리자 권한 명령 프롬프트/PowerShell**에서 실행하세요.
+
+```
+clumsy.exe
+```
+
+실행하면 배너가 출력됩니다:
+
+```
+clumsy 0.4 - console + web network condition simulator
+  Administrator : yes
+  Web dashboard : http://127.0.0.1:8080/
+  Named Pipe    : \\.\pipe\clumsy
+  Presets       : 34 loaded
+  Profiles      : 2 loaded
+  Press Ctrl+C to quit.
+```
+
+배너에 표시된 주소를 브라우저로 열면 대시보드가 나타납니다. 종료는 `Ctrl+C`입니다.
+
+관리자 권한이 아니면 clumsy는 종료되지 않고 **경고를 출력한 뒤 대시보드만 띄웁니다.**
+이 상태에서 캡처를 시작하면 다음과 같은 명확한 오류가 반환됩니다:
+
+```
+clumsy needs Administrator rights to open the WinDivert driver.
+Restart the console as Administrator.
+```
+
+`--elevate on`을 붙이면 UAC 창을 띄워 관리자 권한으로 자기 자신을 재실행합니다
+(새 콘솔 창이 열리고 원래 인스턴스는 종료됩니다).
 
 > **주의**: 이미 실행 중인 clumsy가 있으면 두 번째 실행은 자동으로 종료됩니다. 한 번에 하나만 실행 가능합니다.
 
+> **버전 0.4부터의 변경**: 기존 IUP 기반 데스크톱 GUI 창은 제거되었습니다.
+> 모든 조작은 웹 대시보드 · CLI 인수 · REST API · Named Pipe API로 수행합니다.
+
 ---
 
-## 2. 화면 구성
+## 2. 웹 대시보드 화면 구성
 
-clumsy 창은 크게 두 부분으로 나뉩니다.
+브라우저로 `http://127.0.0.1:8080/`에 접속하면 다음 구성의 단일 페이지가 나타납니다.
 
 ```
-┌─────────────────────────────────────────┐
-│  [Filtering]  ← 필터 영역               │
-│  필터 입력창                            │
-│  ● Start   Presets: [드롭다운]          │
-│         Profile: [드롭다운] [Save]      │
-│         Process: [________]             │
-├─────────────────────────────────────────┤
-│  [Functions]  ← 기능(모듈) 영역         │
-│  ● Lag      Inbound Outbound Delay(ms)  │
-│  ● Jitter   Inbound Outbound Min Max    │
-│  ● Drop     ...                         │
-│  ...                                    │
-├─────────────────────────────────────────┤
-│  [Statistics]  ← 실시간 통계 영역       │
-│  Captured: 1234 (56/s)    Sent: 1200    │
-│  Lag:500  Drop:120  Throttle:50         │
-│  Lag buf: 5  Jitter buf: 3  BW buf: 2  │
-├─────────────────────────────────────────┤
-│  상태 메시지                            │
-└─────────────────────────────────────────┘
+┌───────────────────────────────────────────────────────────┐
+│ ● clumsy v0.4          [Download report] [API]            │  헤더
+├───────────────────────────────────────────────────────────┤
+│ CAPTURE                                                   │
+│  필터 입력창          Preset [▼]  Process [____]          │
+│  [Start] [Stop]                                           │
+│  상태 메시지                                              │
+│  ▸ Filter builder  (프로토콜/방향/포트/IP 조합 → 필터 생성)│
+├───────────────────────────────────────────────────────────┤
+│ LIVE STATISTICS                                           │
+│  [Captured] [Sent] [Packets/sec] [Elapsed] [Buffers]      │
+│  ┌── 실시간 throughput 그래프 ──┐                         │
+├───────────────────────────────────────────────────────────┤
+│ MODULES                                                   │
+│  ☑ Lag        Inbound ☑ Outbound ☑ Delay(ms)[250]  12 affected│
+│  ☐ Jitter     ...                                         │
+│  ☐ Drop       ...                                         │
+│  (11개 모듈)                                              │
+├───────────────────────────────────────────────────────────┤
+│ PROFILES, SCENARIO AND CAPTURE FILE                       │
+│  Profile [▼] [Apply]   Save as [____] [Save]              │
+│  Scenario [________] [Load] [Start] [Stop]                │
+│  pcap     [________] [Start dump] [Stop dump]             │
+└───────────────────────────────────────────────────────────┘
 ```
 
-- **Filtering 영역**: 어떤 패킷을 가로챌지 조건을 설정합니다. Profile 드롭다운으로 저장된 설정 조합을 불러올 수 있고, Process 입력란에 실행파일 이름을 입력하면 해당 프로세스의 패킷만 필터링합니다.
-- **Functions 영역**: 가로챈 패킷에 어떤 효과를 줄지 선택합니다.
-- **Statistics 영역**: 필터링 중 실시간 통계를 표시합니다. 자세한 내용은 아래 [실시간 통계 패널](#실시간-통계-패널) 참조.
-- 각 기능 왼쪽의 **작은 아이콘(점)**은 현재 그 기능이 패킷을 처리하고 있으면 초록색으로 깜박입니다.
+- **헤더의 점(●)**: 실시간 스트림(Server-Sent Events) 연결 상태. 초록이면 정상 연결입니다.
+- **CAPTURE**: 어떤 패킷을 가로챌지 설정합니다. Preset 드롭다운은 `config.json`에서,
+  Process 입력란은 실행파일 이름으로 해당 프로세스의 패킷만 대상으로 삼습니다.
+- **Filter builder**: WinDivert 필터 문법을 몰라도 조합으로 표현식을 생성합니다
+  ([3.5절](#필터-빌더) 참조).
+- **LIVE STATISTICS**: 200ms 주기로 push되는 실시간 수치와 초당 패킷 그래프입니다.
+- **MODULES**: 각 모듈의 체크박스를 켜면 파라미터 입력 폼이 펼쳐집니다.
+  이 폼은 서버가 내려주는 `ParamSpec` 메타데이터로 **자동 생성**되므로,
+  새 모듈이 추가되어도 대시보드는 그대로 동작합니다.
+- **오프라인 동작**: 대시보드는 CDN이나 외부 프레임워크를 전혀 사용하지 않는
+  단일 HTML 파일(`web/index.html`)입니다. 인터넷이 없는 테스트망에서도 그대로 동작합니다.
+
+### 콘솔 출력
+
+콘솔에는 상태 변화와 주기적 요약이 출력됩니다:
+
+```
+Capturing. filter="udp and outbound"
+[  10s] captured=15234 sent=15102 lag=15234 drop=132
+[  20s] captured=31007 sent=30761 lag=31007 drop=246
+```
+
+- 요약 주기는 `--stats-console <초>`로 조정합니다 (기본 10초, `0`이면 끔).
+- `--verbose on`을 주면 패킷 단위 상세 트레이스가 출력됩니다 (성능 영향이 크므로 디버깅 시에만).
 
 ---
 
@@ -108,9 +164,25 @@ udp and outbound and loopback
 ### Start / Stop
 
 필터를 입력한 후 **Start** 버튼을 누르면 패킷 가로채기가 시작됩니다.
-- 필터 문법이 잘못되면 오류 메시지가 하단에 표시됩니다.
-- 실행 중에는 필터 입력창이 비활성화(회색)됩니다.
+- 필터 문법이 잘못되면 상태 영역에 오류 메시지가 표시됩니다.
+- 실행 중에는 Start 버튼이 비활성화됩니다.
 - 중지하려면 **Stop** 버튼을 누릅니다.
+
+CLI에서는 `--filter "식"`을 주면 실행 즉시 캡처가 시작됩니다.
+REST API로는 `POST /api/filter` / `POST /api/stop`, Named Pipe API로는
+`{"cmd":"filter",...}` / `{"cmd":"stop_capture"}`가 같은 동작을 합니다.
+
+### 필터 빌더
+
+대시보드의 **Filter builder**를 펼치면 프로토콜(TCP/UDP/ICMP), 방향(inbound/outbound),
+포트(단일 또는 `7770-7780` 범위), 원격 IPv4, loopback 여부를 조합해
+필터 표현식이 실시간으로 생성됩니다.
+
+- **Use this**: 생성된 표현식을 위 필터 입력창에 넣습니다.
+- **Save as preset...**: 이름을 지정해 `config.json`에 프리셋으로 저장합니다
+  (`POST /api/presets`). 저장된 프리셋은 Preset 드롭다운에 바로 나타납니다.
+
+전부 브라우저에서 처리되므로 서버 왕복이 없습니다.
 
 ### 프로세스별 필터링
 
@@ -393,15 +465,22 @@ TCP 패킷에 RST 플래그를 설정해서 연결을 강제로 끊습니다.
 
 ## 실시간 통계 패널
 
-필터링이 시작되면 UI 하단 **Statistics** 프레임에 실시간 수치가 표시됩니다. 약 200ms 주기로 갱신되며, 정지(Stop) 시 모든 카운터가 초기화됩니다.
+필터링이 시작되면 대시보드의 **LIVE STATISTICS** 영역에 실시간 수치가 표시됩니다.
+서버가 `GET /api/stream`(Server-Sent Events)으로 200ms 주기로 push하며,
+정지(Stop) 시 모든 카운터가 초기화됩니다.
 
 ### 표시 항목
 
-| 행 | 내용 | 설명 |
-|----|------|------|
-| 1 | `Captured: N (M/s)  Sent: S` | 총 캡처 패킷 수, 초당 캡처 속도, 총 전송 패킷 수 |
-| 2 | `Lag:500  Drop:120 ...` | 모듈별 누적 처리 패킷 수. 활성화되었거나 카운트가 0이 아닌 모듈만 표시 |
-| 3 | `Lag buf: 5  Jitter buf: 3  BW buf: 2  BW limit: 100KB/s` | Lag/Jitter/Bandwidth 모듈의 현재 내부 버퍼 크기 및 BW 설정값 |
+| 카드 | 설명 |
+|------|------|
+| `Captured` | 총 캡처 패킷 수 |
+| `Sent` | 총 전송(재주입) 패킷 수 |
+| `Packets / sec` | 초당 캡처 속도 |
+| `Elapsed` | 캡처 경과 시간 |
+| `Buffers` | Lag / Jitter / Bandwidth 모듈의 현재 내부 버퍼 크기 |
+
+그 아래 그래프는 최근 180개 샘플의 초당 패킷 수를 그립니다(Canvas API 직접 렌더링).
+각 모듈 행 오른쪽에는 해당 모듈이 처리한 누적 패킷 수가 표시됩니다.
 
 ### 모듈별 카운터 의미
 
@@ -414,9 +493,13 @@ TCP 패킷에 RST 플래그를 설정해서 연결을 강제로 끊습니다.
 - **Set TCP RST**: RST 주입된 패킷 수
 - **Bandwidth**: 대역폭 큐에 들어간 패킷 수
 
-### Named Pipe API 연동
+### API 연동
 
-`get_stats` 명령의 응답에도 동일한 통계 데이터가 포함됩니다. 자세한 내용은 [Named Pipe 제어 API](#7-named-pipe-제어-api) 섹션을 참조하세요.
+- **REST**: `GET /api/stats` — 위 수치 전부 + 모듈별 카운터 + pcap/시나리오 상태를 JSON으로 반환
+- **SSE**: `GET /api/stream` — 같은 페이로드를 200ms마다 push
+- **Named Pipe**: `{"cmd":"get_stats"}` — 기존과 동일한 응답 형식 유지
+
+자세한 내용은 [제어 API](#7-제어-api-rest--named-pipe) 섹션을 참조하세요.
 
 ### 통계 로그 파일 출력
 
@@ -461,7 +544,10 @@ elapsed_sec,captured,sent,pps,lag,jitter,drop,burstloss,blackout,throttle,duplic
 
 ## 5. CLI 사용법 (자동화)
 
-GUI 없이 명령줄에서 clumsy를 실행하고 설정을 인수로 전달할 수 있습니다.
+명령줄 인수만으로 clumsy를 완전히 구동할 수 있습니다. 대시보드를 열지 않아도 되고,
+`--web off`를 주면 웹 서버 자체를 끌 수도 있습니다.
+
+`clumsy.exe --help`로 전체 목록을 언제든 확인할 수 있습니다.
 
 ### 기본 형식
 
@@ -534,6 +620,11 @@ clumsy.exe --filter "필터식" --모듈명 on [--모듈명-옵션 값] ...
 --tamper-inbound on/off
 --tamper-outbound on/off
 
+--reset on/off
+--reset-chance <%>     RST 주입 확률 (기본: 0)
+--reset-inbound on/off
+--reset-outbound on/off
+
 --bandwidth on/off
 --bandwidth-bandwidth <KB/s>   대역폭 상한 (기본: 10)
 --bandwidth-inbound on/off
@@ -541,7 +632,28 @@ clumsy.exe --filter "필터식" --모듈명 on [--모듈명-옵션 값] ...
 
 --stats-log <파일>     통계 로그 파일 경로 (.csv 또는 .json)
 --stats-interval <초>  로그 기록 주기, 초 단위 (기본: 1)
+--stats-console <초>   콘솔 상태 요약 출력 주기 (기본: 10, 0이면 끔)
+
+--pcap-out <파일>          패킷을 libpcap 형식으로 덤프 (Wireshark 호환)
+--pcap-stage pre|post|both 모듈 적용 전/후 중 어느 시점을 기록할지 (기본: post)
+--pcap-max-packets <n>     덤프 패킷 수 상한 (0=무제한)
+--pcap-max-bytes <n>       덤프 바이트 수 상한 (0=무제한)
+
+--report-out <파일>    캡처 종료 시 HTML 세션 리포트 생성
+--enable-plugins <dir> 커스텀 모듈 DLL 로드 (기본 비활성, 보안 주의)
+
+--web off              웹 대시보드 비활성화
+--web-port <n>         웹 서버 포트 (기본: 8080)
+--web-bind <주소>      바인딩 주소 (기본: 127.0.0.1, 그 외에는 토큰 인증 강제)
+--web-token <토큰>     고정 인증 토큰 (CI 스크립트에서 재사용)
+
+--verbose on/off       패킷 단위 트레이스 로그 (Debug 기본 on, Release 기본 off)
+--elevate on           관리자 권한이 아니면 UAC로 자기 자신을 재실행
+--help                 인수 목록 출력 후 종료
 ```
+
+> 참고: `--tamper-position`은 `0=Front, 1=Center(기본), 2=Back, 3=Random`입니다.
+> (0.3까지의 UI 드롭다운은 1부터 시작했지만, API/CLI 값은 0부터입니다.)
 
 ### 예시
 
@@ -561,6 +673,18 @@ clumsy.exe --filter "udp and outbound" --lag on --lag-time 100 ^
 # 통계를 JSON으로 5초 간격 기록
 clumsy.exe --filter "udp and outbound" --drop on --drop-chance 5.0 ^
            --stats-log result.json --stats-interval 5
+
+# 패킷을 pcap으로 덤프하면서 세션 리포트까지 생성 (CI에서 산출물 수집)
+clumsy.exe --filter "udp and outbound" --lag on --lag-time 120 ^
+           --pcap-out capture.pcap --pcap-max-packets 50000 ^
+           --report-out report.html --timeout 60
+
+# 웹 대시보드를 끄고 완전 헤드리스로 실행
+clumsy.exe --filter "udp and outbound" --drop on --drop-chance 5.0 ^
+           --web off --stats-console 0 --timeout 30
+
+# CI 러너가 원격 테스트 머신을 제어 (토큰 고정)
+clumsy.exe --web-bind 0.0.0.0 --web-port 8080 --web-token ci-secret-token
 ```
 
 ---
@@ -643,7 +767,118 @@ IPv6 환경에서의 게임 테스트를 위한 프리셋도 기본 포함되어
 
 ---
 
-## 7. Named Pipe 제어 API
+## 7. 제어 API (REST + Named Pipe)
+
+clumsy는 두 가지 제어 트랜스포트를 동시에 제공합니다.
+
+| 트랜스포트 | 주소 | 용도 |
+|-----------|------|------|
+| **HTTP REST** | `http://127.0.0.1:8080` (기본) | 웹 대시보드, CI 스크립트, curl |
+| **Named Pipe** | `\\.\pipe\clumsy` | 기존 자동화 스크립트 (0.3 이하와 호환) |
+
+두 트랜스포트는 내부적으로 **동일한 제어 계층**(`controlapi.cpp`)을 호출하므로
+동작이 갈라지지 않습니다. 기존 Named Pipe 스크립트는 수정 없이 그대로 동작합니다.
+
+---
+
+### 7-1. REST API
+
+인증은 바인딩 주소에 따라 결정됩니다:
+
+- **로컬호스트 바인딩(기본)**: 토큰 불필요
+- **`--web-bind`로 외부 바인딩**: 토큰 **필수**.
+  `--web-token`으로 직접 지정하거나, 생략하면 시작 시 자동 생성되어 콘솔 배너에 출력됩니다.
+  전달 방법은 `X-Clumsy-Token` 헤더 또는 `?token=` 쿼리스트링입니다.
+
+#### 엔드포인트 목록
+
+| 메서드 / 경로 | 인증 | 설명 |
+|---|---|---|
+| `GET /api/health` | 불필요 | 생존 확인. CI 헬스체크용 |
+| `GET /api/status` | 필요 | 캡처 상태, 필터, 프로세스, 마지막 메시지 |
+| `GET /api/modules` | 필요 | 모듈 전체 상태 + 현재 파라미터 + ParamSpec 폼 메타데이터 |
+| `GET /api/stats` | 필요 | 실시간 통계 (SSE와 동일 페이로드) |
+| `GET /api/stream` | 필요 | Server-Sent Events, 200ms 주기 통계 push |
+| `GET /api/presets` | 필요 | `config.json`의 필터 프리셋 목록 |
+| `GET /api/profiles` | 필요 | `profiles.json`의 프로파일 이름 목록 |
+| `GET /api/report` | 필요 | HTML 세션 리포트 다운로드 |
+| `GET /api/docs` | 필요 | 엔드포인트 목록(JSON) |
+| `POST /api/filter` | 필요 | 필터 설정 후 캡처 시작 |
+| `POST /api/stop` | 필요 | 캡처 중지 |
+| `POST /api/quit` | 필요 | clumsy 종료 |
+| `POST /api/modules/{shortName}` | 필요 | 모듈 활성화/파라미터 변경 |
+| `POST /api/profiles` | 필요 | 현재 상태를 프로파일로 저장 |
+| `POST /api/profiles/{name}/apply` | 필요 | 프로파일 적용 |
+| `POST /api/presets` | 필요 | 필터 프리셋 저장 (config.json에 기록) |
+| `POST /api/scenario/load` | 필요 | 시나리오 파일 로드 |
+| `POST /api/scenario/start` \| `stop` | 필요 | 시나리오 재생 제어 |
+| `POST /api/pcap/start` \| `stop` | 필요 | pcap 덤프 제어 |
+
+#### 사용 예 (curl)
+
+```bash
+# 상태 조회
+curl http://127.0.0.1:8080/api/status
+
+# 캡처 시작
+curl -X POST http://127.0.0.1:8080/api/filter \
+     -H "Content-Type: application/json" \
+     -d "{\"filter\":\"udp and outbound\",\"process\":\"game.exe\"}"
+
+# lag 켜고 지연 200ms
+curl -X POST http://127.0.0.1:8080/api/modules/lag \
+     -H "Content-Type: application/json" \
+     -d "{\"enabled\":true,\"lag-time\":200}"
+
+# 원격 인스턴스 (토큰 필요)
+curl -H "X-Clumsy-Token: ci-secret-token" http://10.0.0.5:8080/api/stats
+
+# CI 헬스체크 (인증 불필요)
+curl -f http://10.0.0.5:8080/api/health || echo "clumsy is down"
+
+# 캡처 중지 후 리포트 수집
+curl -X POST http://127.0.0.1:8080/api/stop
+curl -o report.html http://127.0.0.1:8080/api/report
+```
+
+#### 실시간 스트림 구독 (Python)
+
+```python
+import requests, json
+
+with requests.get("http://127.0.0.1:8080/api/stream", stream=True) as r:
+    for line in r.iter_lines(decode_unicode=True):
+        if line and line.startswith("data: "):
+            stats = json.loads(line[6:])
+            print(stats["captured"], stats["sent"])
+```
+
+#### ParamSpec으로 폼 자동 생성
+
+`GET /api/modules`는 각 모듈의 입력 폼 정의를 함께 내려줍니다:
+
+```json
+{
+  "shortName": "drop",
+  "displayName": "Drop",
+  "enabled": true,
+  "affected": 132,
+  "params": { "drop-chance": "10.0", "drop-inbound": "true", "drop-outbound": "true" },
+  "paramSpecs": [
+    { "key": "drop-inbound",  "label": "Inbound",    "type": "bool",    "min": 0, "max": 0 },
+    { "key": "drop-outbound", "label": "Outbound",   "type": "bool",    "min": 0, "max": 0 },
+    { "key": "drop-chance",   "label": "Chance (%)", "type": "percent", "min": 0, "max": 100 }
+  ]
+}
+```
+
+`type`은 `int` / `float` / `percent` / `bool` / `action` 중 하나입니다.
+`action`은 값이 없는 일회성 트리거로, 대시보드는 버튼으로 렌더링합니다
+(예: `blackout-trigger`, `reset-next`).
+
+---
+
+### 7-2. Named Pipe API
 
 clumsy는 시작 시 자동으로 Named Pipe 서버(`\\.\pipe\clumsy`)를 열어 외부 프로세스에서 JSON 명령을 통해 제어할 수 있습니다. CI/CD 파이프라인이나 자동화 테스트 스크립트에서 clumsy를 원격으로 조작할 때 사용합니다.
 
@@ -741,6 +976,27 @@ clumsy는 시작 시 자동으로 Named Pipe 서버(`\\.\pipe\clumsy`)를 열어
 
 응답 후 최대 200ms 내에 clumsy가 종료됩니다.
 
+#### 0.4에서 추가된 명령
+
+기존 세 명령(`set` / `get_stats` / `stop`)의 요청·응답 형식은 그대로 유지됩니다.
+아래는 REST API와 동일한 기능을 파이프에서도 쓸 수 있도록 추가된 명령입니다.
+
+| 명령 | 설명 |
+|------|------|
+| `{"cmd":"filter","filter":"udp and outbound","process":"game.exe"}` | 필터 설정 후 캡처 시작 |
+| `{"cmd":"stop_capture"}` | 캡처만 중지 (clumsy는 계속 실행) |
+| `{"cmd":"quit"}` | clumsy 종료 (`stop`과 동일) |
+| `{"cmd":"get_status"}` | 캡처 상태/필터/마지막 메시지 |
+| `{"cmd":"get_modules"}` | 모듈 전체 상태 + ParamSpec |
+| `{"cmd":"get_presets"}` | 필터 프리셋 목록 |
+| `{"cmd":"get_profiles"}` | 프로파일 이름 목록 |
+| `{"cmd":"profile","name":"mobile-4g"}` | 프로파일 적용 |
+| `{"cmd":"scenario","action":"load","path":"s.json"}` | 시나리오 로드 (`action`: load/start/stop) |
+| `{"cmd":"pcap","action":"start","path":"out.pcap"}` | pcap 덤프 제어 (`action`: start/stop) |
+
+> **중요**: `stop`은 0.3과 동일하게 **프로그램 종료**를 의미합니다.
+> 캡처만 멈추려면 `stop_capture`를 사용하세요.
+
 ### Python 연동 예시
 
 ```python
@@ -830,9 +1086,58 @@ clumsy.exe --filter "udp and outbound" --scenario scenario.json
 
 - `"at"`: 필터링 시작 후 몇 초에 적용할지 (정수, 초 단위)
 - `"모듈명": true/false`: 해당 모듈 활성화/비활성화 (모듈 shortName 사용)
-- `"파라미터키": 값`: 모듈 파라미터 변경 (Named Pipe API와 동일한 키 이름)
+- `"파라미터키": 값`: 모듈 파라미터 변경 (제어 API와 동일한 키 이름)
 
 모듈 shortName 목록: `lag`, `jitter`, `drop`, `burstloss`, `blackout`, `throttle`, `ood`, `duplicate`, `tamper`, `reset`, `bandwidth`
+
+### 트리거 종류 (0.4에서 확장)
+
+각 스텝은 **트리거를 하나만** 가집니다.
+
+#### 1) 시간 트리거 — `"at"`
+
+기존과 동일합니다. 캡처 시작 후 지정한 초가 지나면 적용됩니다.
+
+```json
+{ "at": 10, "lag": true, "lag-time": 200 }
+```
+
+#### 2) 조건 트리거 — `"when"` / `"op"` / `"value"`
+
+실제 QA 자동화에서는 "패킷이 N개 쌓이면", "버퍼가 넘치면" 같은 조건이 시간보다 유용합니다.
+
+```json
+{ "when": "captured_count", "op": ">=", "value": 10000,
+  "drop": true, "drop-chance": 15.0 }
+```
+
+- `"op"`: `>=`(기본), `>`, `<=`, `<`, `==`
+- `"value"`: 비교할 숫자
+
+사용 가능한 지표(`when`):
+
+| 지표 | 의미 |
+|------|------|
+| `captured_count` | 총 캡처 패킷 수 |
+| `sent_count` | 총 전송 패킷 수 |
+| `pps` | 초당 캡처 패킷 수 (약 1초 주기로 갱신) |
+| `elapsed_sec` | 캡처 시작 후 경과 초 (실수) |
+| `lag_buf` | Lag 모듈 내부 버퍼 크기 |
+| `jitter_buf` | Jitter 모듈 내부 버퍼 크기 |
+| `bandwidth_buf` | Bandwidth 모듈 큐 크기 |
+| `affected:<모듈명>` | 해당 모듈이 처리한 누적 패킷 수 (예: `affected:drop`) |
+
+#### 3) 반복 — `"repeat"` / `"times"`
+
+스텝이 발동한 뒤 `repeat`초마다 다시 발동합니다. `times`로 횟수를 제한합니다
+(생략하거나 `0`이면 무제한).
+
+```json
+{ "at": 30, "repeat": 30, "times": 5, "drop-chance": 12.0 }
+```
+
+시간 트리거와 조건 트리거 모두 `repeat`을 붙일 수 있습니다.
+반복 스텝이 전부 소진되면 시나리오가 자동 종료됩니다.
 
 ### 예시 파일
 
@@ -881,14 +1186,44 @@ clumsy.exe --filter "udp and outbound" --scenario scenario.json
 ]
 ```
 
+#### 조건 기반 시나리오 (0.4)
+
+부하가 실제로 걸린 시점을 기준으로 조건을 바꾸는 예입니다.
+테스트 머신의 속도에 관계없이 동일한 "트래픽 양" 기준으로 재현됩니다.
+
+```json
+[
+  { "at": 0, "lag": true, "lag-time": 50 },
+
+  { "when": "captured_count", "op": ">=", "value": 20000,
+    "bandwidth": true, "bandwidth-bandwidth": 200 },
+
+  { "when": "lag_buf", "op": ">", "value": 500,
+    "lag-time": 20 },
+
+  { "when": "affected:drop", "op": ">=", "value": 1000,
+    "drop": false },
+
+  { "at": 60, "repeat": 20, "times": 3,
+    "blackout": true, "blackout-trigger": true }
+]
+```
+
+`etc/scenario-example.json`에 위 패턴이 모두 들어간 예제 파일이 들어 있습니다.
+
 ### 주의사항
 
 - `"at"` 값이 같은 스텝이 여러 개면 파일 순서대로 적용됩니다
-- 시간 해상도는 약 200ms (UI 타이머 주기)
+- 조건 트리거 스텝은 파일 순서대로 매 틱 평가됩니다
+- 시간 해상도는 약 200ms (메인 틱 주기)
+- 한 스텝에 `at`과 `when`이 모두 있으면 `when`이 우선합니다 (중복 발동 방지)
+- 최대 128개 스텝, 스텝당 32개 파라미터
 - `--timeout`과 함께 사용하면 시나리오 완료 후 자동 종료 가능:
   ```
   clumsy.exe --filter "udp and outbound" --scenario test.json --timeout 70
   ```
+- 대시보드에서도 시나리오를 로드/시작/중지할 수 있습니다
+  (PROFILES, SCENARIO AND CAPTURE FILE 영역)
 
 ---
 
@@ -925,10 +1260,14 @@ clumsy.exe --filter "udp and outbound" --scenario scenario.json
 
 각 프로파일은 모듈 활성화 플래그(`"모듈명": true`)와 파라미터 키-값 쌍으로 구성됩니다. 키 이름은 CLI 인수와 동일합니다 (예: `lag-time`, `drop-chance`).
 
-### UI에서 사용
+### 웹 대시보드에서 사용
 
-1. **불러오기**: 상단 Filtering 프레임의 **Profile** 드롭다운에서 프로파일을 선택하면 즉시 적용됩니다. 모듈 활성화 상태와 파라미터 값이 모두 반영됩니다.
-2. **저장**: **Save** 버튼을 클릭하면 프로파일 이름을 입력하는 대화상자가 나타납니다. 현재 활성화된 모듈과 그 파라미터 값이 `profiles.json`에 저장됩니다. 같은 이름으로 저장하면 기존 프로파일을 덮어씁니다.
+1. **불러오기**: **PROFILES** 영역의 Profile 드롭다운에서 프로파일을 고르고 **Apply**를 누릅니다.
+   모듈 활성화 상태와 파라미터 값이 모두 반영되고, 모듈 목록이 즉시 갱신됩니다.
+2. **저장**: "Save current as" 입력란에 이름을 넣고 **Save**를 누르면 현재 활성화된 모듈과
+   파라미터 값이 `profiles.json`에 저장됩니다. 같은 이름으로 저장하면 덮어씁니다.
+
+API로는 `POST /api/profiles/{name}/apply`, `POST /api/profiles` (body: `{"name":"..."}`)입니다.
 
 ### CLI에서 사용
 
@@ -941,9 +1280,212 @@ clumsy.exe --filter "udp and outbound" --profile mobile-4g
 ### 주의사항
 
 - `profiles.json`이 없으면 프로파일 드롭다운은 빈 상태로 표시됩니다 (오류 없음)
+- 0.4부터 프로파일에는 방향 플래그(`lag-inbound` 등)도 함께 저장됩니다
 - 최대 32개 프로파일까지 저장 가능
 - 프로파일 적용 시 명시적으로 포함되지 않은 모듈의 상태는 변경되지 않습니다
 - JSON 파일을 직접 편집하여 프로파일을 추가/수정할 수도 있습니다
+
+---
+
+## 10. pcap 패킷 덤프
+
+통계 로그(`--stats-log`)는 집계 수치만 남기므로, 실제 패킷 내용을 봐야 할 때는
+표준 libpcap 파일로 덤프해 Wireshark 등에서 분석할 수 있습니다.
+
+### 사용법
+
+```
+clumsy.exe --filter "udp and outbound" --pcap-out capture.pcap
+```
+
+대시보드에서는 **PROFILES, SCENARIO AND CAPTURE FILE** 영역의 pcap 입력란에
+파일 경로를 넣고 **Start dump** / **Stop dump**로 제어합니다.
+API는 `POST /api/pcap/start` (body: `{"path":"out.pcap","maxPackets":0,"maxBytes":0}`)와
+`POST /api/pcap/stop`입니다.
+
+### 기록 시점 (`--pcap-stage`)
+
+| 값 | 기록 시점 | 용도 |
+|----|----------|------|
+| `post` (기본) | 모든 모듈을 거친 뒤, 실제로 네트워크에 나가기 직전 | 상대방이 실제로 받는 것을 보고 싶을 때 |
+| `pre` | 캡처 직후, 어떤 모듈도 손대기 전 | 원본 트래픽을 보존하고 싶을 때 |
+| `both` | 두 시점 모두 | 변조 전후를 비교하고 싶을 때 (파일이 커집니다) |
+
+`both`로 기록하면 같은 패킷이 두 번 들어가므로, Wireshark에서 시간순으로 보면
+"원본 → 변조본" 쌍으로 나타납니다.
+
+### 크기 제한
+
+무제한 덤프는 디스크를 채울 수 있으므로 상한을 지정하는 것을 권장합니다.
+
+```
+clumsy.exe --filter "udp" --pcap-out capture.pcap ^
+           --pcap-max-packets 100000 --pcap-max-bytes 104857600
+```
+
+상한에 도달하면 파일이 **정상적으로 닫히고** 콘솔에 메시지가 출력됩니다.
+캡처 자체는 계속 진행됩니다.
+
+### 파일 형식
+
+- 링크 타입은 `LINKTYPE_RAW`(101)입니다. WinDivert는 이더넷 프레임 없이
+  IPv4/IPv6 데이터그램만 넘겨주므로 RAW가 정확한 표현입니다.
+- Wireshark에서 열면 자동으로 인식됩니다. 이더넷 헤더가 없다고 나오는 것이 정상입니다.
+- 스냅 길이는 65535바이트입니다.
+
+---
+
+## 11. HTML 세션 리포트
+
+테스트가 끝난 뒤 "어떤 조건으로 얼마나 테스트했는지"를 팀에 공유할 수 있는
+단일 HTML 파일을 생성합니다. 외부 리소스를 전혀 참조하지 않으므로
+이슈 트래커에 첨부하거나 이메일로 보내도 그대로 열립니다.
+
+### 생성 방법
+
+**CLI** — 캡처가 끝나는 시점(Stop 또는 `--timeout` 만료)에 자동 생성:
+
+```
+clumsy.exe --filter "udp and outbound" --lag on --lag-time 120 ^
+           --report-out report.html --timeout 60
+```
+
+**웹 대시보드** — 헤더 오른쪽의 **Download report** 링크
+(`GET /api/report`). 캡처 진행 중에도 현재 시점까지의 리포트를 받을 수 있습니다.
+
+### 리포트 내용
+
+| 섹션 | 내용 |
+|------|------|
+| 헤더 | clumsy 버전, 세션 시작 시각, 지속 시간 |
+| Capture | 적용된 필터 표현식(프로세스 필터 포함) |
+| 카드 | 총 캡처/전송 패킷 수, 평균 초당 패킷 |
+| Throughput | 초당 패킷 수 그래프 (인라인 SVG, 차트 라이브러리 없음) |
+| Modules | 모듈별 종료 시점 활성화 여부, 처리 패킷 수, 파라미터 전체 |
+| Timeline | 세션 시작/종료 및 발동한 시나리오 스텝 기록 |
+| Packet capture | pcap을 함께 사용한 경우 파일 경로와 패킷 수 |
+
+시나리오를 함께 쓰면 각 스텝이 **실제로 몇 초에 발동했는지**가 타임라인에 남으므로,
+조건 트리거가 언제 걸렸는지 사후 확인할 수 있습니다.
+
+### 제한 사항
+
+- 그래프 샘플은 1초 간격으로 최대 600개(10분)까지 기록됩니다.
+  더 긴 세션은 그래프가 앞 10분까지만 그려지고, 총계는 정확히 유지됩니다.
+- 타임라인 이벤트는 최대 256개입니다.
+
+---
+
+## 12. 원격 제어 (분산 QA 환경)
+
+CI 러너가 원격 테스트 클라이언트의 clumsy를 조종하는 구성입니다.
+
+### 테스트 머신에서
+
+```
+clumsy.exe --web-bind 0.0.0.0 --web-port 8080 --web-token ci-secret-token
+```
+
+- `--web-bind`가 로컬호스트가 아니면 **토큰 인증이 강제**됩니다.
+- `--web-token`을 생략하면 토큰이 자동 생성되어 콘솔에 출력됩니다.
+  CI에서는 값을 고정해야 스크립트에서 재사용할 수 있습니다.
+- 외부 바인딩 시 콘솔에 보안 경고가 출력됩니다.
+
+### CI 러너에서
+
+```bash
+CLUMSY=http://10.0.0.5:8080
+TOKEN=ci-secret-token
+
+# 1. 살아 있는지 확인 (인증 불필요)
+curl -f $CLUMSY/api/health || exit 1
+
+# 2. 조건 설정 후 캡처 시작
+curl -sf -X POST $CLUMSY/api/filter -H "X-Clumsy-Token: $TOKEN" \
+     -H "Content-Type: application/json" \
+     -d '{"filter":"udp and outbound"}'
+curl -sf -X POST $CLUMSY/api/modules/lag -H "X-Clumsy-Token: $TOKEN" \
+     -H "Content-Type: application/json" \
+     -d '{"enabled":true,"lag-time":150}'
+
+# 3. 테스트 실행 ...
+
+# 4. 정리 및 산출물 수집
+curl -sf -X POST $CLUMSY/api/stop -H "X-Clumsy-Token: $TOKEN"
+curl -sf -o report.html $CLUMSY/api/report -H "X-Clumsy-Token: $TOKEN"
+```
+
+### 보안 주의사항
+
+clumsy는 관리자 권한으로 실행되며 네트워크 트래픽을 조작할 수 있습니다.
+원격 바인딩은 **신뢰된 격리 테스트망에서만** 사용하세요.
+
+- 토큰은 평문 HTTP로 전달됩니다 (TLS 미지원). 인터넷에 노출하지 마세요.
+- 방화벽에서 해당 포트를 CI 러너 IP로만 제한하는 것을 권장합니다.
+- `/api/health`만 인증 없이 접근 가능하며, 버전과 캡처 여부만 노출합니다.
+
+---
+
+## 13. 커스텀 모듈 플러그인 (선택 기능)
+
+재컴파일 없이 실험용 모듈을 DLL로 로드하는 기능입니다.
+**기본적으로 비활성화**되어 있으며 `--enable-plugins <디렉토리>`로만 켤 수 있습니다.
+
+### 보안 경고
+
+플러그인 DLL은 clumsy와 **동일한 권한(관리자)** 으로 실행됩니다.
+직접 빌드했거나 완전히 신뢰하는 DLL만 로드하세요.
+활성화하면 콘솔에 경고와 함께 로드하는 DLL 파일명이 모두 출력됩니다.
+
+### 플러그인 작성 방법
+
+DLL은 함수 하나를 export 하면 됩니다:
+
+```cpp
+#include "common.h"
+
+static volatile short myEnabled = 0;
+
+static void myStartUp() { /* ... */ }
+static void myCloseDown(PacketNode *head, PacketNode *tail) { /* ... */ }
+static short myProcess(PacketNode *head, PacketNode *tail) { /* ... */ return 0; }
+static int  mySetParam(const char *key, const char *value) { return 0; }
+static int  myGetParams(ParamKV *kv, int maxKv) { return 0; }
+
+static const ParamSpec mySpecs[] = {
+    { "drop-chance", "Chance (%)", "percent", 0, 100 },
+};
+
+static Module myModule = {
+    "My Drop", "drop", (short*)&myEnabled,
+    myStartUp, myCloseDown, myProcess,
+    mySetParam, myGetParams,
+    mySpecs, 1,
+    0, 0, 0
+};
+
+extern "C" __declspec(dllexport) Module* clumsyGetModule(void) {
+    return &myModule;
+}
+```
+
+### 사용법
+
+```
+clumsy.exe --enable-plugins .\plugins --filter "udp and outbound"
+```
+
+지정한 디렉토리의 모든 `*.dll`을 스캔하여 `clumsyGetModule`을 export 하는 것만 로드합니다.
+
+### 현재 제한 사항
+
+- 플러그인은 **기존 내장 모듈을 대체**하는 방식으로만 등록됩니다.
+  `shortName`이 내장 모듈 중 하나와 일치해야 하며, 일치하지 않으면 건너뜁니다.
+  (모듈 테이블 크기 `MODULE_CNT`가 컴파일 타임 상수이기 때문입니다.
+  테이블 확장은 향후 과제입니다.)
+- 최대 8개까지 로드됩니다.
+- 로드된 DLL은 프로세스 종료 시까지 언로드되지 않습니다
+  (`modules[]`가 DLL 내부 메모리를 가리키므로 use-after-free 방지 목적).
 
 ---
 
@@ -964,11 +1506,11 @@ clumsy.exe --filter "udp and outbound" --profile mobile-4g
 | 필터 | `udp and outbound` |
 | Lag | ON, Delay = 150ms |
 
-**GUI 순서**:
-1. Presets에서 `all sending packets` 선택 (또는 직접 `udp and outbound` 입력)
+**대시보드 순서**:
+1. Preset 드롭다운에서 `all sending packets` 선택 (또는 직접 `udp and outbound` 입력)
 2. Start 클릭
 3. Lag 체크박스 ON
-4. Delay(ms)에 `150` 입력
+4. 펼쳐진 폼의 Delay (ms)에 `150` 입력
 
 **확인 방법**: 게임을 실행하고 핑(ms)이 150ms 전후로 고정되는지 확인합니다.
 
@@ -1241,10 +1783,10 @@ udp and outbound and loopback
 | Lag | ON, Delay = 80ms |
 | Drop | ON, Chance = 2.0% |
 
-**GUI 순서**:
-1. Presets에서 `localhost ipv4 udp` 선택 → 자동으로 `udp and outbound and loopback` 입력됨
+**대시보드 순서**:
+1. Preset 드롭다운에서 `localhost ipv4 udp` 선택 → 자동으로 `udp and outbound and loopback` 입력됨
 2. Start 클릭
-3. Lag, Drop 활성화 및 값 설정
+3. Lag, Drop 체크박스를 켜고 값 설정
 
 ---
 

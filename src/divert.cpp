@@ -23,6 +23,38 @@ volatile LONG statsSentTotal = 0;
 static DWORD divertReadLoop(LPVOID arg);
 static DWORD divertClockLoop(LPVOID arg);
 
+// Phase 4.1: this file is the Windows capture backend, so it is one of the two
+// places allowed to see WINDIVERT_ADDRESS. Everything downstream sees only
+// PacketMeta plus the opaque blob carried in PacketNode::backend.
+static_assert(sizeof(WINDIVERT_ADDRESS) <= PACKET_BACKEND_META_SIZE,
+              "PACKET_BACKEND_META_SIZE is too small for WINDIVERT_ADDRESS");
+
+static void fillMetaFromAddr(PacketMeta *meta, const WINDIVERT_ADDRESS *addr) {
+    meta->outbound  = (unsigned char)(addr->Outbound ? 1 : 0);
+    meta->loopback  = (unsigned char)(addr->Loopback ? 1 : 0);
+    meta->impostor  = (unsigned char)(addr->Impostor ? 1 : 0);
+    meta->ipVersion = (unsigned char)(addr->IPv6 ? 6 : 4);
+    meta->ifIdx     = addr->Network.IfIdx;
+    meta->subIfIdx  = addr->Network.SubIfIdx;
+}
+
+// The WinDivert address a node was captured with, needed to re-inject it.
+static INLINE_FUNCTION PWINDIVERT_ADDRESS nodeAddr(PacketNode *node) {
+    return (PWINDIVERT_ADDRESS)node->backend.raw;
+}
+
+// --- capture backend hooks (Phase 4.2) ---
+// On Windows a dropped packet is simply one that is never sent back, so there
+// is nothing to settle. NFQUEUE is the one that has to answer for every id.
+void packetBackendOnFree(PacketNode *node) {
+    UNREFERENCED_PARAMETER(node);
+}
+
+// A clone re-injects through the same address as the original.
+void packetBackendPrepareClone(const PacketNode *src, PacketNode *dst) {
+    memcpy(dst->backend.raw, src->backend.raw, PACKET_BACKEND_META_SIZE);
+}
+
 // not to put these in common.h since modules shouldn't see these
 extern PacketNode * const head;
 extern PacketNode * const tail;
@@ -36,7 +68,7 @@ PWINDIVERT_ICMPHDR dbg_icmp_header;
 PWINDIVERT_ICMPV6HDR dbg_icmpv6_header;
 UINT payload_len;
 void dumpPacket(char *buf, int len, PWINDIVERT_ADDRESS paddr) {
-    char *protocol;
+    const char *protocol;
     UINT16 srcPort = 0, dstPort = 0;
 
     WinDivertHelperParsePacket(buf, len, &dbg_ip_header, &dbg_ipv6_header, NULL,
@@ -150,27 +182,33 @@ static int sendAllListPackets() {
 #endif
 
     while (!isListEmpty()) {
+        PWINDIVERT_ADDRESS paddr;
         pnode = popNode(tail->prev);
+        paddr = nodeAddr(pnode);
         sendLen = 0;
         assert(pnode != head);
+        // Phase 3.1: dump what actually leaves the machine, after every module.
+        pcapExportWriteStage(PCAP_STAGE_POST, pnode->packet, pnode->packetLen,
+                             pnode->meta.outbound);
         // FIXME inbound injection on any kind of packet is failing with a very high percentage
         //       need to contact windivert auther and wait for next release
-        if (!WinDivertSend(divertHandle, pnode->packet, pnode->packetLen, &sendLen, &(pnode->addr))) {
+        if (!WinDivertSend(divertHandle, pnode->packet, pnode->packetLen, &sendLen, paddr)) {
             PWINDIVERT_ICMPHDR icmp_header;
             PWINDIVERT_ICMPV6HDR icmpv6_header;
             PWINDIVERT_IPHDR ip_header;
             PWINDIVERT_IPV6HDR ipv6_header;
             LOG("Failed to send a packet. (%lu)", GetLastError());
-            dumpPacket(pnode->packet, pnode->packetLen, &(pnode->addr));
+            dumpPacket(pnode->packet, pnode->packetLen, paddr);
             // as noted in windivert help, reinject inbound icmp packets some times would fail
             // workaround this by resend them as outbound
             // TODO not sure is this even working as can't find a way to test
             //      need to document about this
             WinDivertHelperParsePacket(pnode->packet, pnode->packetLen, &ip_header, &ipv6_header, NULL,
                 &icmp_header, &icmpv6_header, NULL, NULL, NULL, NULL, NULL, NULL);
-            if ((icmp_header || icmpv6_header) && !pnode->addr.Outbound) {
+            if ((icmp_header || icmpv6_header) && !paddr->Outbound) {
                 BOOL resent;
-                pnode->addr.Outbound = TRUE;
+                paddr->Outbound = TRUE;
+                pnode->meta.outbound = 1;   // keep the neutral view in sync
                 if (ip_header) {
                     UINT32 tmp = ip_header->SrcAddr;
                     ip_header->SrcAddr = ip_header->DstAddr;
@@ -181,7 +219,7 @@ static int sendAllListPackets() {
                     memcpy(ipv6_header->SrcAddr, ipv6_header->DstAddr, sizeof(tmpArr));
                     memcpy(ipv6_header->DstAddr, tmpArr, sizeof(tmpArr));
                 }
-                resent = WinDivertSend(divertHandle, pnode->packet, pnode->packetLen, &sendLen, &(pnode->addr));
+                resent = WinDivertSend(divertHandle, pnode->packet, pnode->packetLen, &sendLen, paddr);
                 LOG("Resend failed inbound ICMP packets as outbound: %s", resent ? "SUCCESS" : "FAIL");
                 InterlockedExchange16(&sendState, SEND_STATUS_SEND);
             } else {
@@ -213,6 +251,18 @@ static void divertConsumeStep() {
     DWORD startTick = GetTickCount(), dt;
 #endif
     int ix, cnt;
+
+    // Phase 3.1: dump the packets as captured, before any module touched them.
+    // Cheap when pcap is off — pcapExportWriteStage() returns on a NULL file.
+    if (pcapExportIsActive()) {
+        PacketNode *pnode = head->next;
+        while (pnode != tail) {
+            pcapExportWriteStage(PCAP_STAGE_PRE, pnode->packet, pnode->packetLen,
+                                 pnode->meta.outbound);
+            pnode = pnode->next;
+        }
+    }
+
     // use lastEnabled to keep track of module starting up and closing down
     for (ix = 0; ix < MODULE_CNT; ++ix) {
         Module *module = modules[ix];
@@ -327,6 +377,7 @@ static DWORD divertClockLoop(LPVOID arg) {
 static DWORD divertReadLoop(LPVOID arg) {
     char packetBuf[MAX_PACKETSIZE];
     WINDIVERT_ADDRESS addrBuf;
+    PacketMeta metaBuf;
     UINT readLen;
     PacketNode *pnode;
     DWORD waitResult;
@@ -367,7 +418,8 @@ static DWORD divertReadLoop(LPVOID arg) {
                 }
                 // create node and put it into the list
                 InterlockedIncrement(&statsCapturedTotal);
-                pnode = createNode(packetBuf, readLen, &addrBuf);
+                fillMetaFromAddr(&metaBuf, &addrBuf);
+                pnode = createNode(packetBuf, readLen, &metaBuf, &addrBuf);
                 appendNode(pnode);
                 divertConsumeStep();
                 /***************** leave critical region ************************/

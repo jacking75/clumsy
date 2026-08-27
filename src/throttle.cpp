@@ -1,5 +1,6 @@
 // throttling packets
-#include "iup.h"
+#include <stdlib.h>
+#include <string.h>
 #include "common.h"
 #define NAME "throttle"
 #define TIME_MIN "0"
@@ -7,8 +8,6 @@
 #define TIME_DEFAULT 30
 // threshold for how many packet to throttle at most
 #define KEEP_AT_MOST 1000
-
-static Ihandle *inboundCheckbox, *outboundCheckbox, *chanceInput, *frameInput, *dropThrottledCheckbox;
 
 static volatile short throttleEnabled = 0,
     throttleInbound = 1, throttleOutbound = 1,
@@ -27,51 +26,6 @@ static INLINE_FUNCTION short isBufEmpty() {
     short ret = bufHead->next == bufTail;
     if (ret) assert(bufSize == 0);
     return ret;
-}
-
-static Ihandle *throttleSetupUI() {
-    Ihandle *throttleControlsBox = IupHbox(
-        dropThrottledCheckbox = IupToggle("Drop Throttled", NULL),
-        IupLabel("Timeframe(ms):"),
-        frameInput = IupText(NULL),
-        inboundCheckbox = IupToggle("Inbound", NULL),
-        outboundCheckbox = IupToggle("Outbound", NULL),
-        IupLabel("Chance(%):"),
-        chanceInput = IupText(NULL),
-        NULL
-        );
-
-    IupSetAttribute(chanceInput, "VISIBLECOLUMNS", "4");
-    IupSetAttribute(chanceInput, "VALUE", "10.0");
-    IupSetCallback(chanceInput, "VALUECHANGED_CB", uiSyncChance);
-    IupSetAttribute(chanceInput, SYNCED_VALUE, (char*)&chance);
-    IupSetCallback(inboundCheckbox, "ACTION", (Icallback)uiSyncToggle);
-    IupSetAttribute(inboundCheckbox, SYNCED_VALUE, (char*)&throttleInbound);
-    IupSetCallback(outboundCheckbox, "ACTION", (Icallback)uiSyncToggle);
-    IupSetAttribute(outboundCheckbox, SYNCED_VALUE, (char*)&throttleOutbound);
-    IupSetCallback(dropThrottledCheckbox, "ACTION", (Icallback)uiSyncToggle);
-    IupSetAttribute(dropThrottledCheckbox, SYNCED_VALUE, (char*)&dropThrottled);
-
-    // sync throttle packet number
-    IupSetAttribute(frameInput, "VISIBLECOLUMNS", "3");
-    IupSetAttribute(frameInput, "VALUE", STR(TIME_DEFAULT));
-    IupSetCallback(frameInput, "VALUECHANGED_CB", (Icallback)uiSyncInteger);
-    IupSetAttribute(frameInput, SYNCED_VALUE, (char*)&throttleFrame);
-    IupSetAttribute(frameInput, INTEGER_MAX, TIME_MAX);
-    IupSetAttribute(frameInput, INTEGER_MIN, TIME_MIN);
-
-    // enable by default to avoid confusing
-    IupSetAttribute(inboundCheckbox, "VALUE", "ON");
-    IupSetAttribute(outboundCheckbox, "VALUE", "ON");
-
-    if (parameterized) {
-        setFromParameter(inboundCheckbox, "VALUE", NAME"-inbound");
-        setFromParameter(outboundCheckbox, "VALUE", NAME"-outbound");
-        setFromParameter(chanceInput, "VALUE", NAME"-chance");
-        setFromParameter(frameInput, "VALUE", NAME"-frame");
-    }
-
-    return throttleControlsBox;
 }
 
 static void throttleStartUp() {
@@ -131,7 +85,7 @@ THROTTLE_START:
             PacketNode *pac = tail->prev;
             DWORD currentTick = timeGetTime();
             while (bufSize < KEEP_AT_MOST && pac != head) {
-                if (checkDirection(pac->addr.Outbound, throttleInbound, throttleOutbound)) {
+                if (checkDirection(pac->meta.outbound, throttleInbound, throttleOutbound)) {
                     insertAfter(popNode(pac), bufHead);
                     ++bufSize;
                     InterlockedIncrement(&throttleModule.affectedCount);
@@ -157,22 +111,24 @@ THROTTLE_START:
 }
 
 static int throttleSetParam(const char *key, const char *value) {
-    if (strcmp(key, "throttle-chance") == 0) {
-        short v = I2S((int)(atof(value) * 100.0 + 0.5));
-        char buf[16];
-        if (v < 0) v = 0; if (v > 10000) v = 10000;
-        InterlockedExchange16(&chance, v);
-        sprintf(buf, "%.1f", (float)v / 100.0f);
-        if (chanceInput) IupStoreAttribute(chanceInput, "VALUE", buf);
+    if (strcmp(key, NAME"-chance") == 0) {
+        InterlockedExchange16(&chance, clampShort((int)(atof(value) * 100.0 + 0.5), 0, 10000));
         return 1;
     }
-    if (strcmp(key, "throttle-frame") == 0) {
-        int v = atoi(value);
-        char buf[16];
-        if (v < 0) v = 0; if (v > 1000) v = 1000;
-        InterlockedExchange16(&throttleFrame, I2S(v));
-        sprintf(buf, "%d", v);
-        if (frameInput) IupStoreAttribute(frameInput, "VALUE", buf);
+    if (strcmp(key, NAME"-frame") == 0) {
+        InterlockedExchange16(&throttleFrame, clampShort(atoi(value), 0, 1000));
+        return 1;
+    }
+    if (strcmp(key, NAME"-drop") == 0) {
+        InterlockedExchange16(&dropThrottled, (short)parseBoolValue(value));
+        return 1;
+    }
+    if (strcmp(key, NAME"-inbound") == 0) {
+        InterlockedExchange16(&throttleInbound, (short)parseBoolValue(value));
+        return 1;
+    }
+    if (strcmp(key, NAME"-outbound") == 0) {
+        InterlockedExchange16(&throttleOutbound, (short)parseBoolValue(value));
         return 1;
     }
     return 0;
@@ -180,26 +136,39 @@ static int throttleSetParam(const char *key, const char *value) {
 
 static int throttleGetParams(ParamKV *kv, int maxKv) {
     int n = 0;
-    if (maxKv < 2) return 0;
-    strcpy(kv[n].key, "throttle-chance");
-    sprintf(kv[n].val, "%.1f", (float)chance / 100.0f);
-    n++;
-    strcpy(kv[n].key, "throttle-frame");
-    sprintf(kv[n].val, "%d", (int)throttleFrame);
-    n++;
+    if (maxKv < 5) return 0;
+    strcpy(kv[n].key, NAME"-chance");
+    sprintf(kv[n].val, "%.1f", (float)chance / 100.0f); n++;
+    strcpy(kv[n].key, NAME"-frame");
+    sprintf(kv[n].val, "%d", (int)throttleFrame); n++;
+    strcpy(kv[n].key, NAME"-drop");
+    strcpy(kv[n].val, dropThrottled ? "true" : "false"); n++;
+    strcpy(kv[n].key, NAME"-inbound");
+    strcpy(kv[n].val, throttleInbound ? "true" : "false"); n++;
+    strcpy(kv[n].key, NAME"-outbound");
+    strcpy(kv[n].val, throttleOutbound ? "true" : "false"); n++;
     return n;
 }
+
+static const ParamSpec throttleParamSpecs[] = {
+    { NAME"-inbound",  "Inbound",         "bool",    0, 0 },
+    { NAME"-outbound", "Outbound",        "bool",    0, 0 },
+    { NAME"-drop",     "Drop throttled",  "bool",    0, 0 },
+    { NAME"-frame",    "Timeframe (ms)",  "int",     0, 1000 },
+    { NAME"-chance",   "Chance (%)",      "percent", 0, 100 },
+};
 
 Module throttleModule = {
     "Throttle",
     NAME,
     (short*)&throttleEnabled,
-    throttleSetupUI,
     throttleStartUp,
     throttleCloseDown,
     throttleProcess,
     throttleSetParam,
     throttleGetParams,
+    throttleParamSpecs,
+    (int)(sizeof(throttleParamSpecs) / sizeof(throttleParamSpecs[0])),
     // runtime fields
-    0, 0, NULL, 0
+    0, 0, 0
 };

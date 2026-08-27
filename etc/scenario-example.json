@@ -19,5 +19,25 @@
 
   { "at": 75,
     "lag": false, "jitter": false, "drop": false,
-    "burstloss": false, "blackout": false, "bandwidth": false }
+    "burstloss": false, "blackout": false, "bandwidth": false },
+
+  {
+    "_comment": "Phase 3.2 condition trigger: tighten the bandwidth cap once the",
+    "_comment2": "session has actually pushed 20000 packets, however long that takes.",
+    "when": "captured_count", "op": ">=", "value": 20000,
+    "bandwidth": true, "bandwidth-bandwidth": 200
+  },
+
+  {
+    "_comment": "Fires when the lag buffer backs up past 500 packets, which means",
+    "_comment3": "the client is not draining fast enough; back the delay off.",
+    "when": "lag_buf", "op": ">", "value": 500,
+    "lag-time": 20
+  },
+
+  {
+    "_comment": "Phase 3.2 repeat: re-randomize the drop rate every 30s, 5 times.",
+    "at": 90, "repeat": 30, "times": 5,
+    "drop": true, "drop-chance": 12.0
+  }
 ]

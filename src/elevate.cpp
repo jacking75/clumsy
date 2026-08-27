@@ -4,6 +4,8 @@
 // http://code.msdn.microsoft.com/windowsdesktop/CppUACSelfElevation-981c0160
 #include <Windows.h>
 #include <VersionHelpers.h>
+#include <shellapi.h>
+#include <ctype.h>
 #include "common.h"
 
 // 
@@ -98,55 +100,67 @@ BOOL IsElevated( ) {
     return fRet;
 }
 
-// try elevate and error out when can't happen
-// is silent then no message boxes are shown
-// return whether to close the program
-BOOL tryElevate(HWND hWnd, BOOL silent) {
-    // Check the current process's "run as administrator" status.
-    BOOL fIsRunAsAdmin;
+// Return the argument portion of a command line, i.e. everything after the
+// (possibly quoted) program name.
+static const char* skipProgramName(const char *cmdLine) {
+    const char *p = cmdLine;
+    if (*p == '"') {
+        p++;
+        while (*p && *p != '"') p++;
+        if (*p == '"') p++;
+    } else {
+        while (*p && !isspace((unsigned char)*p)) p++;
+    }
+    while (isspace((unsigned char)*p)) p++;
+    return p;
+}
+
+// Relaunch self elevated via the UAC "runas" verb.
+//
+// Console builds have no window to parent a MessageBox to, so failures are
+// reported on stdout. Returns TRUE when the caller should exit: either a new
+// elevated instance was launched, or elevation is impossible here.
+BOOL tryElevate(BOOL silent) {
+    char szPath[MAX_PATH];
+    SHELLEXECUTEINFOA sei = { sizeof(sei) };
+
     if (!IsWindowsVistaOrGreater()) {
-        if (!silent) MessageBox(hWnd, (LPCSTR)"Unsupported Windows version. clumsy only supports Windows Vista or above.",
-            (LPCSTR)"Aborting", MB_OK);
+        if (!silent) {
+            INFO("Unsupported Windows version. clumsy only supports Windows Vista or above.");
+        }
         return TRUE;
     }
 
-    fIsRunAsAdmin = IsRunAsAdmin();
-    if (fIsRunAsAdmin) {
-        return FALSE;
+    if (IsRunAsAdmin()) {
+        return FALSE; // nothing to do, keep running
     }
 
-    // when not silent then trying to reinvoke to elevate
-    if (!silent) {
-        wchar_t szPath[MAX_PATH];
-        if (GetModuleFileName(NULL, (LPSTR)szPath, ARRAYSIZE(szPath)))
-        {
-            // Launch itself as administrator.
-            SHELLEXECUTEINFO sei = { sizeof(sei) };
-            sei.lpVerb = (LPSTR)"runas";
-            sei.lpFile = (LPSTR)szPath;
-            sei.hwnd = hWnd;
-            sei.nShow = SW_NORMAL;
-
-            // here it is restartintg the program using run as
-            LOG("Try elevating by runas");
-            if (!ShellExecuteEx(&sei))
-            {
-                DWORD dwError = GetLastError();
-                if (dwError == ERROR_CANCELLED)
-                {
-                    // The user refused the elevation.
-                    // alert and exit
-                    MessageBox(hWnd, (LPCSTR)"clumsy needs to be elevated to work. Run as Administrator or click Yes in promoted UAC dialog",
-                        (LPCSTR)"Aborting", MB_OK);
-                }
-            }
-            // runas executed.
-        } else {
-            MessageBox(hWnd, (LPCSTR)"Failed to get clumsy path. Please place the executable in a normal directory.",
-                (LPCSTR)"Aborting", MB_OK);
+    if (!GetModuleFileNameA(NULL, szPath, ARRAYSIZE(szPath))) {
+        if (!silent) {
+            INFO("Failed to resolve the clumsy executable path; cannot elevate.");
         }
+        return TRUE;
     }
 
-    // exit when not run as admin
+    // Launch itself as administrator. The new process gets its own console.
+    // GetCommandLineA() still has argv[0] in front, so skip past it — passing it
+    // through would show up as a stray argument and fail parseArgs().
+    sei.lpVerb = "runas";
+    sei.lpFile = szPath;
+    sei.lpParameters = skipProgramName(GetCommandLineA());
+    sei.nShow = SW_NORMAL;
+
+    LOG("Try elevating by runas");
+    if (!ShellExecuteExA(&sei)) {
+        DWORD dwError = GetLastError();
+        if (dwError == ERROR_CANCELLED) {
+            INFO("Elevation was refused. Run this console as Administrator instead.");
+        } else {
+            INFO("Elevation failed (code %lu).", dwError);
+        }
+        return TRUE;
+    }
+
+    INFO("Relaunched elevated in a new console window.");
     return TRUE;
 }

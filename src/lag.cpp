@@ -1,5 +1,6 @@
 // lagging packets
-#include "iup.h"
+#include <stdlib.h>
+#include <string.h>
 #include "common.h"
 #define NAME "lag"
 #define LAG_MIN "0"
@@ -10,8 +11,6 @@
 #define LAG_DEFAULT 50
 
 // don't need a chance
-static Ihandle *inboundCheckbox, *outboundCheckbox, *timeInput;
-
 static volatile short lagEnabled = 0,
     lagInbound = 1,
     lagOutbound = 1,
@@ -25,39 +24,6 @@ static INLINE_FUNCTION short isBufEmpty() {
     short ret = bufHead->next == bufTail;
     if (ret) assert(bufSize == 0);
     return ret;
-}
-
-static Ihandle *lagSetupUI() {
-    Ihandle *lagControlsBox = IupHbox(
-        inboundCheckbox = IupToggle("Inbound", NULL),
-        outboundCheckbox = IupToggle("Outbound", NULL),
-        IupLabel("Delay(ms):"),
-        timeInput = IupText(NULL),
-        NULL
-        );
-
-    IupSetAttribute(timeInput, "VISIBLECOLUMNS", "4");
-    IupSetAttribute(timeInput, "VALUE", STR(LAG_DEFAULT));
-    IupSetCallback(timeInput, "VALUECHANGED_CB", uiSyncInteger);
-    IupSetAttribute(timeInput, SYNCED_VALUE, (char*)&lagTime);
-    IupSetAttribute(timeInput, INTEGER_MAX, LAG_MAX);
-    IupSetAttribute(timeInput, INTEGER_MIN, LAG_MIN);
-    IupSetCallback(inboundCheckbox, "ACTION", (Icallback)uiSyncToggle);
-    IupSetAttribute(inboundCheckbox, SYNCED_VALUE, (char*)&lagInbound);
-    IupSetCallback(outboundCheckbox, "ACTION", (Icallback)uiSyncToggle);
-    IupSetAttribute(outboundCheckbox, SYNCED_VALUE, (char*)&lagOutbound);
-
-    // enable by default to avoid confusing
-    IupSetAttribute(inboundCheckbox, "VALUE", "ON");
-    IupSetAttribute(outboundCheckbox, "VALUE", "ON");
-
-    if (parameterized) {
-        setFromParameter(inboundCheckbox, "VALUE", NAME"-inbound");
-        setFromParameter(outboundCheckbox, "VALUE", NAME"-outbound");
-        setFromParameter(timeInput, "VALUE", NAME"-time");
-    }
-
-    return lagControlsBox;
 }
 
 static void lagStartUp() {
@@ -88,7 +54,7 @@ static short lagProcess(PacketNode *head, PacketNode *tail) {
     PacketNode *pac = tail->prev;
     // pick up all packets and fill in the current time
     while (bufSize < KEEP_AT_MOST && pac != head) {
-        if (checkDirection(pac->addr.Outbound, lagInbound, lagOutbound)) {
+        if (checkDirection(pac->meta.outbound, lagInbound, lagOutbound)) {
             insertAfter(popNode(pac), bufHead)->timestamp = timeGetTime();
             ++bufSize;
             InterlockedIncrement(&lagModule.affectedCount);
@@ -124,24 +90,38 @@ static short lagProcess(PacketNode *head, PacketNode *tail) {
 }
 
 static int lagSetParam(const char *key, const char *value) {
-    if (strcmp(key, "lag-time") == 0) {
-        int v = atoi(value);
-        char buf[16];
-        if (v < 0) v = 0; if (v > 15000) v = 15000;
-        InterlockedExchange16(&lagTime, I2S(v));
-        sprintf(buf, "%d", v);
-        if (timeInput) IupStoreAttribute(timeInput, "VALUE", buf);
+    if (strcmp(key, NAME"-time") == 0) {
+        InterlockedExchange16(&lagTime, clampShort(atoi(value), 0, 15000));
+        return 1;
+    }
+    if (strcmp(key, NAME"-inbound") == 0) {
+        InterlockedExchange16(&lagInbound, (short)parseBoolValue(value));
+        return 1;
+    }
+    if (strcmp(key, NAME"-outbound") == 0) {
+        InterlockedExchange16(&lagOutbound, (short)parseBoolValue(value));
         return 1;
     }
     return 0;
 }
 
 static int lagGetParams(ParamKV *kv, int maxKv) {
-    if (maxKv < 1) return 0;
-    strcpy(kv[0].key, "lag-time");
-    sprintf(kv[0].val, "%d", (int)lagTime);
-    return 1;
+    int n = 0;
+    if (maxKv < 3) return 0;
+    strcpy(kv[n].key, NAME"-time");
+    sprintf(kv[n].val, "%d", (int)lagTime); n++;
+    strcpy(kv[n].key, NAME"-inbound");
+    strcpy(kv[n].val, lagInbound ? "true" : "false"); n++;
+    strcpy(kv[n].key, NAME"-outbound");
+    strcpy(kv[n].val, lagOutbound ? "true" : "false"); n++;
+    return n;
 }
+
+static const ParamSpec lagParamSpecs[] = {
+    { NAME"-inbound",  "Inbound",    "bool", 0, 0 },
+    { NAME"-outbound", "Outbound",   "bool", 0, 0 },
+    { NAME"-time",     "Delay (ms)", "int",  0, 15000 },
+};
 
 int lagGetBufSize(void) { return bufSize; }
 
@@ -149,12 +129,13 @@ Module lagModule = {
     "Lag",
     NAME,
     (short*)&lagEnabled,
-    lagSetupUI,
     lagStartUp,
     lagCloseDown,
     lagProcess,
     lagSetParam,
     lagGetParams,
+    lagParamSpecs,
+    (int)(sizeof(lagParamSpecs) / sizeof(lagParamSpecs[0])),
     // runtime fields
-    0, 0, NULL, 0
+    0, 0, 0
 };

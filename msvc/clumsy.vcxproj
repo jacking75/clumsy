@@ -57,7 +57,6 @@
   <PropertyGroup Label="UserMacros">
     <ProjectRoot>$(ProjectDir)..\</ProjectRoot>
     <DivertDir>$(ProjectRoot)external\WinDivert-2.2.0-A\</DivertDir>
-    <IupDir>$(ProjectRoot)external\iup-3.30_Win64_dll16_lib\</IupDir>
   </PropertyGroup>
 
   <!-- Output directories -->
@@ -84,19 +83,19 @@
       <WarningLevel>Level4</WarningLevel>
       <Optimization>Disabled</Optimization>
       <PreprocessorDefinitions>_DEBUG;_CRT_SECURE_NO_WARNINGS;X64;_WIN32_WINNT=0x0601;%(PreprocessorDefinitions)</PreprocessorDefinitions>
-      <AdditionalIncludeDirectories>$(DivertDir)include;$(IupDir)include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(DivertDir)include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
-      <CompileAs>CompileAsC</CompileAs>
-      <LanguageStandard_C>stdc11</LanguageStandard_C>
+      <LanguageStandard>stdcpp23</LanguageStandard>
+      <ConformanceMode>true</ConformanceMode>
+      <AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions>
       <DisableSpecificWarnings>4214;%(DisableSpecificWarnings)</DisableSpecificWarnings>
       <RuntimeLibrary>MultiThreadedDebugDLL</RuntimeLibrary>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
       <GenerateDebugInformation>true</GenerateDebugInformation>
-      <AdditionalLibraryDirectories>$(DivertDir)x64;$(IupDir);%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
-      <AdditionalDependencies>WinDivert.lib;iup.lib;comctl32.lib;Winmm.lib;ws2_32.lib;iphlpapi.lib;%(AdditionalDependencies)</AdditionalDependencies>
-      <EntryPointSymbol>mainCRTStartup</EntryPointSymbol>
+      <AdditionalLibraryDirectories>$(DivertDir)x64;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalDependencies>WinDivert.lib;Winmm.lib;ws2_32.lib;iphlpapi.lib;Shell32.lib;Advapi32.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <ImageHasSafeExceptionHandlers>false</ImageHasSafeExceptionHandlers>
       <GenerateManifest>false</GenerateManifest>
       <AdditionalOptions>/MANIFEST:NO /ignore:4075 %(AdditionalOptions)</AdditionalOptions>
@@ -115,21 +114,21 @@
       <FunctionLevelLinking>true</FunctionLevelLinking>
       <IntrinsicFunctions>true</IntrinsicFunctions>
       <PreprocessorDefinitions>NDEBUG;_CRT_SECURE_NO_WARNINGS;X64;_WIN32_WINNT=0x0601;%(PreprocessorDefinitions)</PreprocessorDefinitions>
-      <AdditionalIncludeDirectories>$(DivertDir)include;$(IupDir)include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(DivertDir)include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
-      <CompileAs>CompileAsC</CompileAs>
-      <LanguageStandard_C>stdc11</LanguageStandard_C>
+      <LanguageStandard>stdcpp23</LanguageStandard>
+      <ConformanceMode>true</ConformanceMode>
+      <AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions>
       <DisableSpecificWarnings>4214;%(DisableSpecificWarnings)</DisableSpecificWarnings>
       <RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary>
     </ClCompile>
     <Link>
-      <SubSystem>Windows</SubSystem>
+      <SubSystem>Console</SubSystem>
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <EnableCOMDATFolding>true</EnableCOMDATFolding>
       <OptimizeReferences>true</OptimizeReferences>
-      <AdditionalLibraryDirectories>$(DivertDir)x64;$(IupDir);%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
-      <AdditionalDependencies>WinDivert.lib;iup.lib;comctl32.lib;Winmm.lib;ws2_32.lib;iphlpapi.lib;%(AdditionalDependencies)</AdditionalDependencies>
-      <EntryPointSymbol>mainCRTStartup</EntryPointSymbol>
+      <AdditionalLibraryDirectories>$(DivertDir)x64;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalDependencies>WinDivert.lib;Winmm.lib;ws2_32.lib;iphlpapi.lib;Shell32.lib;Advapi32.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <ImageHasSafeExceptionHandlers>false</ImageHasSafeExceptionHandlers>
       <GenerateManifest>false</GenerateManifest>
       <AdditionalOptions>/MANIFEST:NO /ignore:4075 %(AdditionalOptions)</AdditionalOptions>
@@ -144,31 +143,41 @@
   <!-- Source files                                                     -->
   <!-- ================================================================ -->
   <ItemGroup>
-    <ClCompile Include="$(ProjectRoot)src\main.c" />
-    <ClCompile Include="$(ProjectRoot)src\divert.c" />
-    <ClCompile Include="$(ProjectRoot)src\packet.c" />
-    <ClCompile Include="$(ProjectRoot)src\elevate.c" />
-    <ClCompile Include="$(ProjectRoot)src\utils.c" />
-    <ClCompile Include="$(ProjectRoot)src\lag.c" />
-    <ClCompile Include="$(ProjectRoot)src\jitter.c" />
-    <ClCompile Include="$(ProjectRoot)src\drop.c" />
-    <ClCompile Include="$(ProjectRoot)src\burstloss.c" />
-    <ClCompile Include="$(ProjectRoot)src\blackout.c" />
-    <ClCompile Include="$(ProjectRoot)src\throttle.c" />
-    <ClCompile Include="$(ProjectRoot)src\duplicate.c" />
-    <ClCompile Include="$(ProjectRoot)src\ood.c" />
-    <ClCompile Include="$(ProjectRoot)src\tamper.c" />
-    <ClCompile Include="$(ProjectRoot)src\reset.c" />
-    <ClCompile Include="$(ProjectRoot)src\bandwidth.c" />
-    <ClCompile Include="$(ProjectRoot)src\pipe.c" />
-    <ClCompile Include="$(ProjectRoot)src\statslog.c" />
-    <ClCompile Include="$(ProjectRoot)src\procfilter.c" />
-    <ClCompile Include="$(ProjectRoot)src\scenario.c" />
-    <ClCompile Include="$(ProjectRoot)src\profile.c" />
+    <ClCompile Include="$(ProjectRoot)src\main.cpp" />
+    <ClCompile Include="$(ProjectRoot)src\divert.cpp" />
+    <ClCompile Include="$(ProjectRoot)src\packet.cpp" />
+    <ClCompile Include="$(ProjectRoot)src\elevate.cpp" />
+    <ClCompile Include="$(ProjectRoot)src\utils.cpp" />
+    <ClCompile Include="$(ProjectRoot)src\lag.cpp" />
+    <ClCompile Include="$(ProjectRoot)src\jitter.cpp" />
+    <ClCompile Include="$(ProjectRoot)src\drop.cpp" />
+    <ClCompile Include="$(ProjectRoot)src\burstloss.cpp" />
+    <ClCompile Include="$(ProjectRoot)src\blackout.cpp" />
+    <ClCompile Include="$(ProjectRoot)src\throttle.cpp" />
+    <ClCompile Include="$(ProjectRoot)src\duplicate.cpp" />
+    <ClCompile Include="$(ProjectRoot)src\ood.cpp" />
+    <ClCompile Include="$(ProjectRoot)src\tamper.cpp" />
+    <ClCompile Include="$(ProjectRoot)src\reset.cpp" />
+    <ClCompile Include="$(ProjectRoot)src\bandwidth.cpp" />
+    <ClCompile Include="$(ProjectRoot)src\pipe.cpp" />
+    <ClCompile Include="$(ProjectRoot)src\statslog.cpp" />
+    <ClCompile Include="$(ProjectRoot)src\procfilter.cpp" />
+    <ClCompile Include="$(ProjectRoot)src\scenario.cpp" />
+    <ClCompile Include="$(ProjectRoot)src\profile.cpp" />
+    <ClCompile Include="$(ProjectRoot)src\json.cpp" />
+    <ClCompile Include="$(ProjectRoot)src\controlapi.cpp" />
+    <ClCompile Include="$(ProjectRoot)src\httpserver.cpp" />
+    <ClCompile Include="$(ProjectRoot)src\pcapexport.cpp" />
+    <ClCompile Include="$(ProjectRoot)src\report.cpp" />
+    <ClCompile Include="$(ProjectRoot)src\plugin.cpp" />
+    <ClCompile Include="$(ProjectRoot)src\packetutil_win.cpp" />
   </ItemGroup>
 
   <ItemGroup>
     <ClInclude Include="$(ProjectRoot)src\common.h" />
+    <ClInclude Include="$(ProjectRoot)src\json.h" />
+    <ClInclude Include="$(ProjectRoot)src\controlapi.h" />
+    <ClInclude Include="$(ProjectRoot)src\httpserver.h" />
   </ItemGroup>
 
   <ItemGroup>
@@ -183,11 +192,12 @@
       <Command>
 copy /Y "$(DivertDir)x64\WinDivert.dll" "$(OutDir)" &gt; nul
 copy /Y "$(DivertDir)x64\WinDivert64.sys" "$(OutDir)" &gt; nul
-copy /Y "$(IupDir)iup.dll" "$(OutDir)" &gt; nul
 copy /Y "$(ProjectRoot)etc\config.json" "$(OutDir)" &gt; nul
 copy /Y "$(ProjectRoot)etc\config.txt" "$(OutDir)" &gt; nul
+if not exist "$(OutDir)web" mkdir "$(OutDir)web"
+copy /Y "$(ProjectRoot)etc\web\*" "$(OutDir)web\" &gt; nul
       </Command>
-      <Message>Copying runtime files (WinDivert, IUP, config) to output...</Message>
+      <Message>Copying runtime files (WinDivert, config, web dashboard) to output...</Message>
     </PostBuildEvent>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
@@ -195,11 +205,12 @@ copy /Y "$(ProjectRoot)etc\config.txt" "$(OutDir)" &gt; nul
       <Command>
 copy /Y "$(DivertDir)x64\WinDivert.dll" "$(OutDir)" &gt; nul
 copy /Y "$(DivertDir)x64\WinDivert64.sys" "$(OutDir)" &gt; nul
-copy /Y "$(IupDir)iup.dll" "$(OutDir)" &gt; nul
 copy /Y "$(ProjectRoot)etc\config.json" "$(OutDir)" &gt; nul
 copy /Y "$(ProjectRoot)etc\config.txt" "$(OutDir)" &gt; nul
+if not exist "$(OutDir)web" mkdir "$(OutDir)web"
+copy /Y "$(ProjectRoot)etc\web\*" "$(OutDir)web\" &gt; nul
       </Command>
-      <Message>Copying runtime files (WinDivert, IUP, config) to output...</Message>
+      <Message>Copying runtime files (WinDivert, config, web dashboard) to output...</Message>
     </PostBuildEvent>
   </ItemDefinitionGroup>
 

@@ -6,7 +6,6 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
-#include <Windows.h>
 #include "common.h"
 
 static FILE *logFile = NULL;

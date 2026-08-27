@@ -10,7 +10,7 @@
 //                  shuffle on release.
 
 #include <stdlib.h>
-#include "iup.h"
+#include <string.h>
 #include "common.h"
 
 #define NAME "ood"
@@ -20,9 +20,6 @@
 #define OOD_BUF_MAX   "50"
 #define OOD_DELAY_MIN "10"
 #define OOD_DELAY_MAX "2000"
-
-static Ihandle *inboundCheckbox, *outboundCheckbox;
-static Ihandle *chanceInput, *bufInput, *delayInput;
 
 static volatile short oodEnabled   = 0,
     oodInbound   = 1,
@@ -79,57 +76,6 @@ static void releaseBufShuffled(PacketNode *head) {
     LOG("ood: released %d packets shuffled", count);
 }
 
-static Ihandle* oodSetupUI() {
-    Ihandle *oodControlsBox = IupHbox(
-        inboundCheckbox  = IupToggle("Inbound",  NULL),
-        outboundCheckbox = IupToggle("Outbound", NULL),
-        IupLabel("Chance(%):"),
-        chanceInput = IupText(NULL),
-        IupLabel("Buf:"),
-        bufInput    = IupText(NULL),
-        IupLabel("Delay(ms):"),
-        delayInput  = IupText(NULL),
-        NULL
-    );
-
-    IupSetAttribute(chanceInput, "VISIBLECOLUMNS", "4");
-    IupSetAttribute(chanceInput, "VALUE", "10.0");
-    IupSetCallback(chanceInput, "VALUECHANGED_CB", uiSyncChance);
-    IupSetAttribute(chanceInput, SYNCED_VALUE, (char*)&chance);
-
-    IupSetAttribute(bufInput, "VISIBLECOLUMNS", "2");
-    IupSetAttribute(bufInput, "VALUE", STR(OOD_BUF_DEFAULT));
-    IupSetCallback(bufInput, "VALUECHANGED_CB", uiSyncInteger);
-    IupSetAttribute(bufInput, SYNCED_VALUE, (char*)&maxBuffer);
-    IupSetAttribute(bufInput, INTEGER_MAX, OOD_BUF_MAX);
-    IupSetAttribute(bufInput, INTEGER_MIN, OOD_BUF_MIN);
-
-    IupSetAttribute(delayInput, "VISIBLECOLUMNS", "4");
-    IupSetAttribute(delayInput, "VALUE", STR(OOD_DELAY_DEFAULT));
-    IupSetCallback(delayInput, "VALUECHANGED_CB", uiSyncInteger);
-    IupSetAttribute(delayInput, SYNCED_VALUE, (char*)&maxDelay);
-    IupSetAttribute(delayInput, INTEGER_MAX, OOD_DELAY_MAX);
-    IupSetAttribute(delayInput, INTEGER_MIN, OOD_DELAY_MIN);
-
-    IupSetCallback(inboundCheckbox,  "ACTION", (Icallback)uiSyncToggle);
-    IupSetAttribute(inboundCheckbox,  SYNCED_VALUE, (char*)&oodInbound);
-    IupSetCallback(outboundCheckbox, "ACTION", (Icallback)uiSyncToggle);
-    IupSetAttribute(outboundCheckbox, SYNCED_VALUE, (char*)&oodOutbound);
-
-    IupSetAttribute(inboundCheckbox,  "VALUE", "ON");
-    IupSetAttribute(outboundCheckbox, "VALUE", "ON");
-
-    if (parameterized) {
-        setFromParameter(inboundCheckbox,  "VALUE", NAME"-inbound");
-        setFromParameter(outboundCheckbox, "VALUE", NAME"-outbound");
-        setFromParameter(chanceInput, "VALUE", NAME"-chance");
-        setFromParameter(bufInput,    "VALUE", NAME"-buffer");
-        setFromParameter(delayInput,  "VALUE", NAME"-delay");
-    }
-
-    return oodControlsBox;
-}
-
 static void oodStartUp() {
     if (bufHead->next == NULL && bufTail->next == NULL) {
         bufHead->next = bufTail;
@@ -165,7 +111,7 @@ static short oodProcess(PacketNode *head, PacketNode *tail) {
     while (pac != head) {
         prevPac = pac->prev;
         if (bufSize < buf
-            && checkDirection(pac->addr.Outbound, oodInbound, oodOutbound)
+            && checkDirection(pac->meta.outbound, oodInbound, oodOutbound)
             && calcChance(chance)) {
             insertAfter(popNode(pac), bufHead)->timestamp = now;
             ++bufSize;
@@ -188,31 +134,24 @@ static short oodProcess(PacketNode *head, PacketNode *tail) {
 }
 
 static int oodSetParam(const char *key, const char *value) {
-    if (strcmp(key, "ood-chance") == 0) {
-        short v = I2S((int)(atof(value) * 100.0 + 0.5));
-        char buf[16];
-        if (v < 0) v = 0; if (v > 10000) v = 10000;
-        InterlockedExchange16(&chance, v);
-        sprintf(buf, "%.1f", (float)v / 100.0f);
-        if (chanceInput) IupStoreAttribute(chanceInput, "VALUE", buf);
+    if (strcmp(key, NAME"-chance") == 0) {
+        InterlockedExchange16(&chance, clampShort((int)(atof(value) * 100.0 + 0.5), 0, 10000));
         return 1;
     }
-    if (strcmp(key, "ood-buffer") == 0) {
-        int v = atoi(value);
-        char buf[16];
-        if (v < 2) v = 2; if (v > 50) v = 50;
-        InterlockedExchange16(&maxBuffer, I2S(v));
-        sprintf(buf, "%d", v);
-        if (bufInput) IupStoreAttribute(bufInput, "VALUE", buf);
+    if (strcmp(key, NAME"-buffer") == 0) {
+        InterlockedExchange16(&maxBuffer, clampShort(atoi(value), 2, 50));
         return 1;
     }
-    if (strcmp(key, "ood-delay") == 0) {
-        int v = atoi(value);
-        char buf[16];
-        if (v < 10) v = 10; if (v > 2000) v = 2000;
-        InterlockedExchange16(&maxDelay, I2S(v));
-        sprintf(buf, "%d", v);
-        if (delayInput) IupStoreAttribute(delayInput, "VALUE", buf);
+    if (strcmp(key, NAME"-delay") == 0) {
+        InterlockedExchange16(&maxDelay, clampShort(atoi(value), 10, 2000));
+        return 1;
+    }
+    if (strcmp(key, NAME"-inbound") == 0) {
+        InterlockedExchange16(&oodInbound, (short)parseBoolValue(value));
+        return 1;
+    }
+    if (strcmp(key, NAME"-outbound") == 0) {
+        InterlockedExchange16(&oodOutbound, (short)parseBoolValue(value));
         return 1;
     }
     return 0;
@@ -220,29 +159,39 @@ static int oodSetParam(const char *key, const char *value) {
 
 static int oodGetParams(ParamKV *kv, int maxKv) {
     int n = 0;
-    if (maxKv < 3) return 0;
-    strcpy(kv[n].key, "ood-chance");
-    sprintf(kv[n].val, "%.1f", (float)chance / 100.0f);
-    n++;
-    strcpy(kv[n].key, "ood-buffer");
-    sprintf(kv[n].val, "%d", (int)maxBuffer);
-    n++;
-    strcpy(kv[n].key, "ood-delay");
-    sprintf(kv[n].val, "%d", (int)maxDelay);
-    n++;
+    if (maxKv < 5) return 0;
+    strcpy(kv[n].key, NAME"-chance");
+    sprintf(kv[n].val, "%.1f", (float)chance / 100.0f); n++;
+    strcpy(kv[n].key, NAME"-buffer");
+    sprintf(kv[n].val, "%d", (int)maxBuffer); n++;
+    strcpy(kv[n].key, NAME"-delay");
+    sprintf(kv[n].val, "%d", (int)maxDelay); n++;
+    strcpy(kv[n].key, NAME"-inbound");
+    strcpy(kv[n].val, oodInbound ? "true" : "false"); n++;
+    strcpy(kv[n].key, NAME"-outbound");
+    strcpy(kv[n].val, oodOutbound ? "true" : "false"); n++;
     return n;
 }
+
+static const ParamSpec oodParamSpecs[] = {
+    { NAME"-inbound",  "Inbound",     "bool",    0, 0 },
+    { NAME"-outbound", "Outbound",    "bool",    0, 0 },
+    { NAME"-chance",   "Chance (%)",  "percent", 0, 100 },
+    { NAME"-buffer",   "Buffer",      "int",     2, 50 },
+    { NAME"-delay",    "Delay (ms)",  "int",     10, 2000 },
+};
 
 Module oodModule = {
     "Out of order",
     NAME,
     (short*)&oodEnabled,
-    oodSetupUI,
     oodStartUp,
     oodCloseDown,
     oodProcess,
     oodSetParam,
     oodGetParams,
+    oodParamSpecs,
+    (int)(sizeof(oodParamSpecs) / sizeof(oodParamSpecs[0])),
     // runtime fields
-    0, 0, NULL, 0
+    0, 0, 0
 };

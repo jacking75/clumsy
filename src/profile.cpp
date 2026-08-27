@@ -21,7 +21,6 @@
 // Apply via CLI:  --profile mobile-4g
 // Apply via UI:   Profile dropdown in the top bar
 
-#include <Windows.h>
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
@@ -131,7 +130,7 @@ void profilesLoad(void) {
 
     f = fopen(filePath, "r");
     if (!f) {
-        LOG("profiles: '%s' not found — no profiles loaded", filePath);
+        LOG("profiles: '%s' not found - no profiles loaded", filePath);
         return;
     }
 
