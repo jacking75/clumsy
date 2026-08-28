@@ -15,10 +15,12 @@
 // else is rejected at open time with a clear message rather than injecting
 // nonsense.
 //
-// Threading: one replay thread does all the reading, sleeping and injecting.
-// pcapReplayStop() sets the stop flag and joins that thread before touching
-// any backend state, so the lazily-opened injection handle/sockets are only
-// ever used from a single thread.
+// Threading: one replay thread does all the reading, sleeping and injecting,
+// and it is the only user of the injection backend. It therefore closes that
+// backend itself on the way out instead of letting pcapReplayStop() do it:
+// two Stop requests arriving together, or a Stop whose join times out, would
+// otherwise pull the handle out from under a thread still inside
+// packetBackendInject().
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -40,6 +42,10 @@
 
 #define REPLAY_MAX_PACKET   65535
 #define ETHER_HEADER_LEN    14
+
+// How long pcapReplayStop() waits for the replay thread. Long enough for a
+// blocking inject to drain, short enough that the caller gets an answer.
+#define REPLAY_JOIN_TIMEOUT 5000
 
 #pragma pack(push, 1)
 typedef struct {
@@ -150,6 +156,7 @@ static DWORD WINAPI replayThreadProc(LPVOID arg) {
     int swapped = 0;
     unsigned int linkType = LINKTYPE_RAW;
     char err[MSG_BUFSIZE] = "";
+    char path[MSG_BUFSIZE] = "";
     double speed;
     int loopForever;
 
@@ -162,11 +169,15 @@ static DWORD WINAPI replayThreadProc(LPVOID arg) {
         return 0;
     }
 
+    EnterCriticalSection(&replayLock);
     speed       = (replaySpeed > 0.0) ? replaySpeed : 1.0;
     loopForever = replayLoop;
+    strncpy(path, replayFilePath, sizeof(path) - 1);
+    path[sizeof(path) - 1] = '\0';
+    LeaveCriticalSection(&replayLock);
 
     do {
-        FILE *f = openAndValidate(replayFilePath, &swapped, &linkType, err, sizeof(err));
+        FILE *f = openAndValidate(path, &swapped, &linkType, err, sizeof(err));
         unsigned long long firstTs = 0;
         DWORD wallStart;
         int first = 1;
@@ -248,6 +259,11 @@ static DWORD WINAPI replayThreadProc(LPVOID arg) {
     INFO("replay: finished - %ld read, %ld injected, %ld skipped",
          (long)replayReadCount, (long)replaySentCount, (long)replayFailedCount);
 
+    // Close the backend here, not in pcapReplayStop(): this thread is its only
+    // user, and it is the only place that knows for certain no inject is in
+    // flight. Clear replayActive afterwards so that once a caller observes
+    // "not active" the handle really is gone and a fresh run can open its own.
+    packetBackendInjectClose();
     InterlockedExchange16(&replayActive, 0);
     return 0;
 }
@@ -325,23 +341,39 @@ void pcapReplayStop(void) {
 
     EnterCriticalSection(&replayLock);
     InterlockedExchange16(&replayStop, 1);
+    // Whoever takes the handle owns the join; a second concurrent Stop finds
+    // NULL and simply returns instead of racing ahead of the first one.
     t = replayThread;
     replayThread = NULL;
     LeaveCriticalSection(&replayLock);
 
-    if (t) {
-        // Join before closing the backend: the replay thread is the only user
-        // of the injection handle, and closing it underneath would be a
-        // use-after-free.
-        WaitForSingleObject(t, 5000);
-        CloseHandle(t);
+    if (!t) return;
+
+    if (WaitForSingleObject(t, REPLAY_JOIN_TIMEOUT) == WAIT_TIMEOUT) {
+        // Wedged inside a blocking inject. The thread closes the backend and
+        // clears replayActive itself, so there is nothing safe to tear down
+        // from here - say so rather than reporting a stop that did not happen.
+        INFO("replay: thread still running after %d ms; it will finish in the "
+             "background and no new replay can start until it does.",
+             REPLAY_JOIN_TIMEOUT);
     }
-    InterlockedExchange16(&replayActive, 0);
-    packetBackendInjectClose();
+    CloseHandle(t);
 }
 
 int  pcapReplayIsActive(void) { return replayActive; }
 long pcapReplayRead(void)     { return replayReadCount; }
 long pcapReplaySent(void)     { return replaySentCount; }
 long pcapReplayFailed(void)   { return replayFailedCount; }
-const char* pcapReplayPath(void) { return replayFilePath; }
+
+// Copies rather than handing out the buffer: pcapReplayStart() rewrites it
+// under replayLock while report.cpp renders from an HTTP worker, and a raw
+// pointer would let the reader see half of each path.
+void pcapReplayPathCopy(char *buf, int size) {
+    if (!buf || size <= 0) return;
+    buf[0] = '\0';
+    if (!replayLockReady) return;
+    EnterCriticalSection(&replayLock);
+    strncpy(buf, replayFilePath, (size_t)size - 1);
+    buf[size - 1] = '\0';
+    LeaveCriticalSection(&replayLock);
+}

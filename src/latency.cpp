@@ -8,11 +8,21 @@
 // Who writes: lag.cpp and jitter.cpp, from their process() functions, which
 // the divert threads call while holding the capture mutex. Writes are
 // therefore already serialised against each other. Who reads: HTTP worker
-// threads (/api/stats, /metrics) and the report renderer, with no lock at all.
-// The counters are LONG and updated through the Interlocked helpers, so a
-// reader always sees a whole value - never a torn one - and at worst sees a
-// histogram from a few microseconds ago. That is the right trade for a
-// statistics counter that must not slow the packet path down.
+// threads (/api/stats, /metrics) and the report renderer.
+//
+// latencyRecord() stays lock-free: the counters are LONG and updated through
+// the Interlocked helpers, so a reader always sees a whole value - never a
+// torn one - and at worst a histogram from a few microseconds ago. That is
+// the right trade for a statistics counter that must not slow the packet path
+// down, and a concurrent record can only ever *add* to a bucket, which no
+// reader is confused by.
+//
+// latencyReset() is the exception and takes latencyLock, which every reader
+// takes too. A reset empties the buckets, and a reader that snapshotted a
+// non-zero total and then watched them go to zero underneath it would walk off
+// the end of its search and report p99 = 0ms for a session that had real
+// delays in it. Resets happen once per capture, so the lock costs nothing
+// where it matters.
 //
 // The bucket bounds are geometric rather than linear so the same histogram
 // resolves a 2ms jitter setting and a 15s lag setting without reconfiguration.
@@ -40,14 +50,35 @@ static volatile LONG maxMs      = 0;
 static volatile LONG sumLow  = 0;
 static volatile LONG sumHigh = 0;
 
+static CRITICAL_SECTION latencyLock;
+static volatile short   latencyLockReady = 0;
+
+void latencyInit(void) {
+    if (latencyLockReady) return;
+    InitializeCriticalSection(&latencyLock);
+    latencyLockReady = 1;
+}
+
+// Every reader is short, and all of them run before latencyInit() during
+// argument parsing; these two keep that case from being spelled out at each
+// call site.
+static INLINE_FUNCTION void latencyLockEnter(void) {
+    if (latencyLockReady) EnterCriticalSection(&latencyLock);
+}
+static INLINE_FUNCTION void latencyLockLeave(void) {
+    if (latencyLockReady) LeaveCriticalSection(&latencyLock);
+}
+
 void latencyReset(void) {
     int i;
+    latencyLockEnter();
     for (i = 0; i < LATENCY_BUCKETS; ++i) InterlockedExchange(&buckets[i], 0);
     InterlockedExchange(&totalCount, 0);
     InterlockedExchange(&minMs, 0);
     InterlockedExchange(&maxMs, 0);
     InterlockedExchange(&sumLow, 0);
     InterlockedExchange(&sumHigh, 0);
+    latencyLockLeave();
 }
 
 void latencyRecord(DWORD delayMs) {
@@ -80,8 +111,16 @@ void latencyRecord(DWORD delayMs) {
 }
 
 LONG latencyCount(void) { return totalCount; }
-LONG latencyMin(void)   { return totalCount ? minMs : 0; }
-LONG latencyMax(void)   { return maxMs; }
+
+LONG latencyMin(void) {
+    LONG v;
+    latencyLockEnter();
+    v = totalCount ? minMs : 0;
+    latencyLockLeave();
+    return v;
+}
+
+LONG latencyMax(void) { return maxMs; }
 
 LONG latencyBucketUpper(int ix) {
     if (ix < 0 || ix >= LATENCY_BUCKETS) return 0;
@@ -89,18 +128,33 @@ LONG latencyBucketUpper(int ix) {
 }
 
 LONG latencyBucketCount(int ix) {
+    LONG v;
     if (ix < 0 || ix >= LATENCY_BUCKETS) return 0;
-    return buckets[ix];
+    latencyLockEnter();
+    v = buckets[ix];
+    latencyLockLeave();
+    return v;
 }
 
+// sumHigh and sumLow only mean anything together, so a reset landing between
+// the two loads would produce a total that never existed.
 double latencySumMs(void) {
-    return (double)sumHigh * (double)SUM_ROLLOVER + (double)sumLow;
+    double v;
+    latencyLockEnter();
+    v = (double)sumHigh * (double)SUM_ROLLOVER + (double)sumLow;
+    latencyLockLeave();
+    return v;
 }
 
 double latencyMean(void) {
-    LONG n = totalCount;
+    LONG n;
+    double sum;
+    latencyLockEnter();
+    n   = totalCount;
+    sum = (double)sumHigh * (double)SUM_ROLLOVER + (double)sumLow;
+    latencyLockLeave();
     if (n <= 0) return 0.0;
-    return latencySumMs() / (double)n;
+    return sum / (double)n;
 }
 
 // Linear interpolation inside whichever bucket contains the requested rank.
@@ -115,15 +169,25 @@ double latencyMean(void) {
 // a range a third of which never contained any. Both clamps are no-ops for
 // interior buckets, where min is already below lo and max already above hi.
 double latencyPercentile(double pct) {
-    LONG n = totalCount;
-    double target, cumulative = 0.0;
+    double target, cumulative = 0.0, result;
+    LONG n, lowest, highest;
     int i;
 
-    if (n <= 0) return 0.0;
     if (pct < 0.0)   pct = 0.0;
     if (pct > 100.0) pct = 100.0;
 
+    // Everything the walk needs is read under one lock, so the histogram it
+    // works from is the histogram that existed at a single instant.
+    latencyLockEnter();
+    n       = totalCount;
+    lowest  = minMs;
+    highest = maxMs;
+    if (n <= 0) {
+        latencyLockLeave();
+        return 0.0;
+    }
     target = (double)n * pct / 100.0;
+    result = (double)highest;
 
     for (i = 0; i < LATENCY_BUCKETS; ++i) {
         double count = (double)buckets[i];
@@ -132,17 +196,19 @@ double latencyPercentile(double pct) {
             double lo = (i == 0) ? 0.0 : (double)bucketUpper[i - 1];
             // The open-ended last bucket has no nominal upper edge at all, so
             // the largest delay seen is the only one available.
-            double hi = (bucketUpper[i] != 0) ? (double)bucketUpper[i] : (double)maxMs;
+            double hi = (bucketUpper[i] != 0) ? (double)bucketUpper[i] : (double)highest;
             double frac;
-            if (lo < (double)minMs) lo = (double)minMs;
-            if (hi > (double)maxMs) hi = (double)maxMs;
+            if (lo < (double)lowest)  lo = (double)lowest;
+            if (hi > (double)highest) hi = (double)highest;
             if (hi < lo) hi = lo;
             frac = (target - cumulative) / count;
             if (frac < 0.0) frac = 0.0;
             if (frac > 1.0) frac = 1.0;
-            return lo + frac * (hi - lo);
+            result = lo + frac * (hi - lo);
+            break;
         }
         cumulative += count;
     }
-    return (double)maxMs;
+    latencyLockLeave();
+    return result;
 }

@@ -29,8 +29,12 @@ static short resetProcess(PacketNode *head, PacketNode *tail) {
     const UINT tcpMinSize = packetMinTcpSize();
     PacketNode *pac = head->next;
     while (pac != tail) {
+        // >=, not >: packetMinTcpSize() is the smallest packet packetSetTcpRst()
+        // can work with, and packetSetTcpRst() itself accepts exactly that size.
+        // A strict > skipped the option-less minimum TCP packet - a bare ACK -
+        // even at --reset-chance 100.
         if (checkDirection(pac->meta.outbound, resetInbound, resetOutbound)
-            && pac->packetLen > tcpMinSize
+            && pac->packetLen >= tcpMinSize
             && (setNextCount || calcChance(chance)))
         {
             if (packetSetTcpRst(pac->packet, pac->packetLen)) {

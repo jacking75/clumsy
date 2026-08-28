@@ -135,11 +135,20 @@ BOOL tryElevate(BOOL silent) {
         return FALSE; // nothing to do, keep running
     }
 
-    if (!GetModuleFileNameA(NULL, szPath, ARRAYSIZE(szPath))) {
-        if (!silent) {
-            INFO("Failed to resolve the clumsy executable path; cannot elevate.");
+    // A path that did not fit comes back as nSize, not 0, with the result
+    // truncated and (pre-Windows-10) not even null-terminated. Relaunching a
+    // truncated path either fails or, worse, names a different file, so treat
+    // "filled the buffer exactly" as the failure it is.
+    {
+        const DWORD n = GetModuleFileNameA(NULL, szPath, ARRAYSIZE(szPath));
+        if (n == 0 || n >= ARRAYSIZE(szPath)) {
+            szPath[ARRAYSIZE(szPath) - 1] = '\0';
+            if (!silent) {
+                INFO("Failed to resolve the clumsy executable path%s; cannot elevate.",
+                     n ? " (it is longer than " STR(MAX_PATH) " characters)" : "");
+            }
+            return TRUE;
         }
-        return TRUE;
     }
 
     // Launch itself as administrator. The new process gets its own console.

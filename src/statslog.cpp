@@ -2,6 +2,14 @@
 //
 // Activated via CLI:  --stats-log stats.csv  --stats-interval 1
 // Writes one row per interval while filtering is active.
+//
+// Threading: this file has no lock of its own. All three entry points run with
+// main.cpp's appLock held - statsLogStart() and statsLogStop() from
+// appStartCapture()/appStopCapture(), statsLogTick() from the main tick loop -
+// and that is what serialises them, exactly as the synchronisation table in
+// CLAUDE.md says. Start and stop both arrive on HTTP and pipe worker threads,
+// so opening the file outside the lock would let a concurrent stop close the
+// FILE* this thread is still writing to. Keep any new caller inside appLock.
 
 #include <stdlib.h>
 #include <stdio.h>
@@ -24,6 +32,10 @@ static int endsWithIgnoreCase(const char *str, const char *suffix) {
 
 void statsLogStart(const char *path, int intervalSec) {
     if (!path || path[0] == '\0') return;
+
+    // Close any previous run rather than dropping its handle: a JSON log left
+    // open would also be missing its closing bracket and unreadable.
+    if (logFile) statsLogStop();
 
     logIsJson = endsWithIgnoreCase(path, ".json");
     logFile = fopen(path, "w");

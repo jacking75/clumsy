@@ -18,9 +18,34 @@ void logPrintf(const char *fmt, ...) {
     fflush(stdout);
 }
 
+int appendf(char *buf, int bufSize, int pos, const char *fmt, ...) {
+    va_list args;
+    int n;
+
+    if (!buf || pos < 0 || pos >= bufSize - 1) return pos;
+    va_start(args, fmt);
+    n = vsnprintf(buf + pos, (size_t)(bufSize - pos), fmt, args);
+    va_end(args);
+    if (n < 0) return pos;
+    // snprintf reports what it *would* have written, not what it did. Adding
+    // that straight to pos is how a truncating append walks past the end of
+    // the buffer and makes the next call's remaining size negative - which,
+    // cast to size_t, becomes a licence to write anywhere.
+    if (n > bufSize - pos - 1) n = bufSize - pos - 1;
+    return pos + n;
+}
+
 short calcChance(short chance) {
     // notice that here we made a copy of chance, so even though it's volatile it is still ok
     return (chance == 10000) || ((rand() % 10000) < chance);
+}
+
+double randUnit(void) {
+    // Uniform in the open interval (0,1). The half-step at both ends is what
+    // makes it open rather than half-open, which matters to the callers that
+    // feed the result to log(): jitter.cpp's lognormal/pareto draws and
+    // corrupt.cpp's geometric bit-error gap both diverge at exactly 0.
+    return ((double)rand() + 0.5) / ((double)RAND_MAX + 1.0);
 }
 
 static short resolutionSet = 0;

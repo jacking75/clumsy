@@ -78,12 +78,47 @@ static const char* pluginError(void) {
 #endif
 }
 
-static int registerPluginModule(Module *m, const char *dllName) {
-    int ix;
-    if (!m || !m->shortName || !m->process || !m->enabledFlag) {
-        INFO("plugin: %s returned an incomplete Module, skipping.", dllName);
+// Everything the packet path and the control API dereference without checking.
+// divert.cpp calls startUp/closeDown unconditionally when a module is toggled,
+// and controlapi.cpp walks paramSpecs[0..paramSpecCount). A plugin that leaves
+// any of these out crashes the capture thread the moment the module is enabled,
+// or the HTTP thread on the next GET /api/modules - a long way from the load
+// that actually caused it, so the check belongs here.
+static int validatePluginModule(const Module *m, const char *dllName) {
+    const char *missing = NULL;
+
+    if (!m)                  missing = "the Module pointer itself";
+    else if (!m->shortName)  missing = "shortName";
+    else if (!m->displayName) missing = "displayName";
+    else if (!m->enabledFlag) missing = "enabledFlag";
+    else if (!m->process)    missing = "process";
+    else if (!m->startUp)    missing = "startUp";
+    else if (!m->closeDown)  missing = "closeDown";
+    else if (m->paramSpecCount < 0) missing = "a non-negative paramSpecCount";
+    else if (m->paramSpecCount > 0 && !m->paramSpecs) missing = "paramSpecs";
+
+    if (missing) {
+        INFO("plugin: %s returned a Module without %s, skipping.", dllName, missing);
         return 0;
     }
+
+    for (int i = 0; i < m->paramSpecCount; ++i) {
+        const ParamSpec &spec = m->paramSpecs[i];
+        if (!spec.key || !spec.label || !spec.type) {
+            INFO("plugin: %s paramSpecs[%d] has a NULL key, label or type, "
+                 "skipping the module.", dllName, i);
+            return 0;
+        }
+    }
+
+    // setParam and getParams are genuinely optional: common.h documents NULL as
+    // "this module has no parameters", and every caller checks them.
+    return 1;
+}
+
+static int registerPluginModule(Module *m, const char *dllName) {
+    int ix;
+    if (!validatePluginModule(m, dllName)) return 0;
     for (ix = 0; ix < MODULE_CNT; ++ix) {
         if (strcmp(modules[ix]->shortName, m->shortName) == 0) {
             INFO("plugin: %s replaces the built-in '%s' module.", dllName, m->shortName);

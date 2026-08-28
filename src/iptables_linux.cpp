@@ -85,6 +85,7 @@ int iptablesAutoIsEnabled(void) { return autoEnabled; }
 int iptablesAutoInstall(const FilterProgram *prog, int queueNum, UINT32 injectMark) {
     IptablesRule rules[MAX_DERIVED_RULES];
     int exact = 1;
+    int anyV4 = 0, anyV6 = 0;
     char spec[320];
 
     if (!parseBoolValue(argGet("auto-iptables"))) {
@@ -108,6 +109,8 @@ int iptablesAutoInstall(const FilterProgram *prog, int queueNum, UINT32 injectMa
     for (int i = 0; i < count; ++i) {
         const char *tool = rules[i].ipv6 ? "ip6tables" : "iptables";
 
+        if (rules[i].ipv6) anyV6 = 1; else anyV4 = 1;
+
         // --queue-bypass is deliberate: if clumsy dies without cleaning up, the
         // kernel passes traffic through instead of blackholing it.
         snprintf(spec, sizeof(spec), "%s -j NFQUEUE --queue-num %d --queue-bypass",
@@ -121,9 +124,15 @@ int iptablesAutoInstall(const FilterProgram *prog, int queueNum, UINT32 injectMa
         }
     }
 
-    // Now the bypass, which ends up above everything installed above.
+    // Now the bypass, which ends up above everything installed above. It has to
+    // go into whichever table the NFQUEUE rules went into: divert_linux.cpp
+    // stamps the same fwmark on the IPv6 injection socket as on the IPv4 one,
+    // and an ip6tables NFQUEUE rule with no matching ACCEPT above it is exactly
+    // the feedback loop the fwmark exists to prevent - 10 packets in, 246106
+    // out, measured.
     snprintf(spec, sizeof(spec), "-m mark --mark 0x%x -j ACCEPT", injectMark);
-    if (!recordAndInstall("iptables", "OUTPUT", spec)) goto rollback;
+    if (anyV4 && !recordAndInstall("iptables",  "OUTPUT", spec)) goto rollback;
+    if (anyV6 && !recordAndInstall("ip6tables", "OUTPUT", spec)) goto rollback;
 
     INFO("auto-iptables: installed %d rule(s) for queue %d.", installedCount, queueNum);
     if (!exact) {

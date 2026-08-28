@@ -32,6 +32,9 @@ static short dupProcess(PacketNode *head, PacketNode *tail) {
             LOG("duplicating w/ chance %.1f%%, cloned additionally %d packets", chance/100.0, copies);
             while (copies--) {
                 PacketNode *copy = cloneNode(pac);
+                // Out of memory. The original is still on its way, so stop
+                // cloning rather than dereferencing NULL in the packet path.
+                if (!copy) break;
                 insertBefore(copy, pac); // must insertBefore or next packet is still pac
                 InterlockedIncrement(&dupModule.affectedCount);
             }

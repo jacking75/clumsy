@@ -195,7 +195,7 @@ WinDivertRecv()
 - 콘솔에 출력되는 **문자열 리터럴은 ASCII만** 사용합니다. Windows 콘솔은 사용자 OEM
   코드페이지(한국어 환경은 949)로 동작하므로 UTF-8 em-dash 등은 깨집니다. 주석은 UTF-8 자유.
 - 외부 의존성은 WinDivert 하나뿐입니다. HTTP 서버/JSON 파서/pcap 라이터/웹 UI는 자체 구현이며,
-  이 방침의 근거는 [TODO.md](TODO.md) 부록 A와 [docs/CODING_STYLE.md](docs/CODING_STYLE.md)에 있습니다.
+  이 방침의 근거는 [docs/CODING_STYLE.md](docs/CODING_STYLE.md) 5절에 있습니다.
 - 리눅스 개발은 **WSL2(Ubuntu 24.04) + g++-16**에서 합니다. 빌드·권한·iptables 연동·플랫폼
   차이는 [docs/LINUX.md](docs/LINUX.md)에 전부 정리되어 있습니다.
   단, WSL2는 자체 네트워크 네임스페이스라 **Windows 호스트 앱의 트래픽은 조작하지 못합니다** —

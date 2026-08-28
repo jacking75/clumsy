@@ -44,11 +44,6 @@ static void corruptCloseDown(PacketNode *head, PacketNode *tail) {
     LOG("corrupt closed down");
 }
 
-// Uniform in (0,1). The half-step keeps log() away from an exact zero.
-static INLINE_FUNCTION double corruptUrand(void) {
-    return ((double)rand() + 0.5) / ((double)RAND_MAX + 1.0);
-}
-
 // Flips bits in [data, data+len) at the configured rate. Returns how many.
 static int flipBits(char *data, UINT len, LONG ppm) {
     double p, logq;
@@ -69,7 +64,7 @@ static int flipBits(char *data, UINT len, LONG ppm) {
 
     for (;;) {
         // Geometric gap to the next error, in bits.
-        double gap = log(corruptUrand()) / logq;
+        double gap = log(randUnit()) / logq;
         if (!(gap >= 0.0) || gap >= (double)totalBits) break;   // also catches NaN
         bit += (unsigned long)gap;
         if (bit >= totalBits) break;
@@ -158,6 +153,7 @@ static const ParamSpec corruptParamSpecs[] = {
 };
 
 LONG corruptGetBitsFlipped(void) { return corruptBitsFlipped; }
+void corruptResetStats(void) { InterlockedExchange(&corruptBitsFlipped, 0); }
 
 Module corruptModule = {
     "Corrupt",

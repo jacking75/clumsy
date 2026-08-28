@@ -169,9 +169,40 @@ void pcapExportStop(void) {
 }
 
 int  pcapExportIsActive(void) { return pcapActive; }
-long pcapExportCount(void)    { return pcapPackets; }
-long pcapExportBytes(void)    { return pcapBytes; }
-const char* pcapExportPath(void) { return pcapFilePath; }
+
+// Every write to these happens under pcapLock, so every read does too: an HTML
+// report rendering on an HTTP worker while a new pcap session starts would
+// otherwise print a count from one session next to a path from the other, or
+// half of each path.
+long pcapExportCount(void) {
+    long v;
+    if (!pcapLockReady) return pcapPackets;
+    EnterCriticalSection(&pcapLock);
+    v = pcapPackets;
+    LeaveCriticalSection(&pcapLock);
+    return v;
+}
+
+long pcapExportBytes(void) {
+    long v;
+    if (!pcapLockReady) return pcapBytes;
+    EnterCriticalSection(&pcapLock);
+    v = pcapBytes;
+    LeaveCriticalSection(&pcapLock);
+    return v;
+}
+
+// A copy, not the buffer itself - a pointer would let the caller read it after
+// the lock is gone, which is the very thing this is here to prevent.
+void pcapExportPathCopy(char *buf, int size) {
+    if (!buf || size <= 0) return;
+    buf[0] = '\0';
+    if (!pcapLockReady) return;
+    EnterCriticalSection(&pcapLock);
+    strncpy(buf, pcapFilePath, (size_t)size - 1);
+    buf[size - 1] = '\0';
+    LeaveCriticalSection(&pcapLock);
+}
 
 void pcapExportWriteStage(int stage, const char *packet, UINT len, BOOL outbound) {
     PcapRecordHeader rh;

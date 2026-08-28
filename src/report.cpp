@@ -150,19 +150,6 @@ static int htmlEscapeInto(const char *src, char *dst, int dstSize) {
     return i;
 }
 
-// Appends into buf with bounds checking; returns the new write position.
-static int appendf(char *buf, int bufSize, int pos, const char *fmt, ...) {
-    va_list args;
-    int n;
-    if (pos >= bufSize - 1) return pos;
-    va_start(args, fmt);
-    n = vsnprintf(buf + pos, bufSize - pos, fmt, args);
-    va_end(args);
-    if (n < 0) return pos;
-    if (n > bufSize - pos - 1) n = bufSize - pos - 1;
-    return pos + n;
-}
-
 // Inline SVG line chart of packets/sec, computed from the cumulative samples.
 static int renderChart(char *buf, int bufSize, int pos) {
     const int W = 900, H = 220, PAD = 36;
@@ -306,6 +293,8 @@ static int renderLocked(char *buf, int bufSize) {
     int pos = 0, ix, i;
     char esc[FILTER_BUFSIZE * 2];
     char timeBuf[64];
+    char ppath[MSG_BUFSIZE];
+    char rpath[MSG_BUFSIZE];
     DWORD durationMs;
     LONG captured, sent;
 
@@ -395,6 +384,15 @@ static int renderLocked(char *buf, int bufSize) {
     }
     pos = appendf(buf, bufSize, pos, "</table></div>\n");
 
+    // "Packets affected" says how many packets corrupt touched but not how
+    // hard it hit them; this is the number to compare against the configured
+    // bit error rate.
+    if (corruptGetBitsFlipped() > 0) {
+        pos = appendf(buf, bufSize, pos,
+            "<p class=\"muted\">Corrupt flipped %ld bit(s) in total.</p>\n",
+            (long)corruptGetBitsFlipped());
+    }
+
     // --- timeline ---
     pos = appendf(buf, bufSize, pos,
         "<h2>Timeline</h2>\n<div class=\"wrap\"><table>\n"
@@ -414,17 +412,19 @@ static int renderLocked(char *buf, int bufSize) {
     }
     pos = appendf(buf, bufSize, pos, "</table></div>\n");
 
-    if (pcapExportPath()[0]) {
+    pcapExportPathCopy(ppath, sizeof(ppath));
+    if (ppath[0]) {
         char pesc[MSG_BUFSIZE * 2];
-        htmlEscapeInto(pcapExportPath(), pesc, sizeof(pesc));
+        htmlEscapeInto(ppath, pesc, sizeof(pesc));
         pos = appendf(buf, bufSize, pos,
             "<h2>Packet capture</h2>\n<p>%ld packets written to <code>%s</code>.</p>\n",
             pcapExportCount(), pesc);
     }
 
-    if (pcapReplayPath()[0]) {
+    pcapReplayPathCopy(rpath, sizeof(rpath));
+    if (rpath[0]) {
         char resc[MSG_BUFSIZE * 2];
-        htmlEscapeInto(pcapReplayPath(), resc, sizeof(resc));
+        htmlEscapeInto(rpath, resc, sizeof(resc));
         pos = appendf(buf, bufSize, pos,
             "<h2>Packet replay</h2>\n<p>%ld packets read from <code>%s</code>, "
             "%ld injected, %ld skipped.</p>\n",

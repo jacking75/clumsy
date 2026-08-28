@@ -219,6 +219,9 @@ int jitterGetBufSize(void);
 int bandwidthGetBufSize(void);
 LONG bandwidthGetLimitKBps(void);
 LONG corruptGetBitsFlipped(void);
+// Cleared by statsReset() so the counter covers one capture session, the same
+// way the module affected counts and the latency histogram do.
+void corruptResetStats(void);
 
 // Stats log file output  (statslog.cpp)
 void statsLogStart(const char *path, int intervalSec);
@@ -260,11 +263,18 @@ int  scenarioStepCount(void);
 int  scenarioIsActive(void);
 
 // Profile save/load  (profile.cpp)
+#define MAX_PROFILES      32
+#define PROFILE_NAME_SIZE 48
+// Creates the lock guarding the profile array. Call once at startup.
+void        profileInit(void);
 void        profilesLoad(void);          // loads profiles.json from exe directory
 int         profileApply(const char *name); // 1=ok, 0=not found
 int         profileSaveCurrent(const char *name); // save current module state, 1=ok
 int         profileCount(void);
-const char* profileGetName(int ix);      // 0-indexed
+// Copies up to maxNames profile names out in one locked pass and returns how
+// many were written. Listing with count()+getName(i) instead would let a
+// concurrent delete shift the array between the two calls.
+int         profileNamesSnapshot(char names[][PROFILE_NAME_SIZE], int maxNames);
 int         profileDelete(const char *name); // 1=deleted, 0=not found
 
 // pcap export  (pcapexport.cpp, Phase 3.1)
@@ -278,7 +288,9 @@ void pcapExportStop(void);
 int  pcapExportIsActive(void);
 long pcapExportCount(void);
 long pcapExportBytes(void);
-const char* pcapExportPath(void);
+// Copies the path of the file being written into buf; empty when idle.
+// A copy rather than a pointer so readers cannot catch a half-rewritten path.
+void pcapExportPathCopy(char *buf, int size);
 // Called from the divert threads inside the capture mutex.
 void pcapExportWriteStage(int stage, const char *packet, UINT len, BOOL outbound);
 
@@ -302,6 +314,9 @@ int  reportRenderHtml(char *buf, int bufSize);
 // the cost stays at one increment per delayed packet no matter how long the
 // session runs.
 #define LATENCY_BUCKETS 13
+// Creates the lock that keeps a reset from tearing a reader's view. Call once
+// at startup, before any capture can begin.
+void  latencyInit(void);
 void  latencyReset(void);
 // Called from a module's process(), i.e. inside the capture mutex.
 void  latencyRecord(DWORD delayMs);
@@ -330,7 +345,9 @@ int  pcapReplayIsActive(void);
 long pcapReplayRead(void);
 long pcapReplaySent(void);
 long pcapReplayFailed(void);
-const char* pcapReplayPath(void);
+// Copies the path of the file being replayed into buf; empty when idle.
+// A copy rather than a pointer so readers cannot catch a half-rewritten path.
+void pcapReplayPathCopy(char *buf, int size);
 
 // Plugin modules  (plugin.cpp, Phase 3.6)
 int  pluginLoadDir(const char *dir);
@@ -341,7 +358,14 @@ void pluginUnloadAll(void);
 #define STR_HELPER(x) #x
 #define STR(x) STR_HELPER(x)
 
+// Appends a formatted string at buf[pos] and returns the new position, never
+// past bufSize-1. Truncation is silent but always safe; use this rather than
+// accumulating snprintf return values by hand.
+int appendf(char *buf, int bufSize, int pos, const char *fmt, ...);
+
 short calcChance(short chance);
+// Uniform random in the open interval (0,1) - safe to pass to log().
+double randUnit(void);
 
 // inline helper for inbound outbound check
 static INLINE_FUNCTION

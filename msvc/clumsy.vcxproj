@@ -1,4 +1,4 @@
-<?xml version="1.0" encoding="utf-8"?>
+﻿<?xml version="1.0" encoding="utf-8"?>
 <Project DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
 
   <ItemGroup Label="ProjectConfigurations">
@@ -89,6 +89,10 @@
       <ConformanceMode>true</ConformanceMode>
       <AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions>
       <DisableSpecificWarnings>4214;%(DisableSpecificWarnings)</DisableSpecificWarnings>
+      <!-- httpserver.cpp puts a try/catch around each connection so one bad
+           request cannot abort the process; that needs real unwind semantics,
+           and std::string is used throughout anyway. -->
+      <ExceptionHandling>Sync</ExceptionHandling>
       <RuntimeLibrary>MultiThreadedDebugDLL</RuntimeLibrary>
     </ClCompile>
     <Link>
@@ -120,6 +124,10 @@
       <ConformanceMode>true</ConformanceMode>
       <AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions>
       <DisableSpecificWarnings>4214;%(DisableSpecificWarnings)</DisableSpecificWarnings>
+      <!-- httpserver.cpp puts a try/catch around each connection so one bad
+           request cannot abort the process; that needs real unwind semantics,
+           and std::string is used throughout anyway. -->
+      <ExceptionHandling>Sync</ExceptionHandling>
       <RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary>
     </ClCompile>
     <Link>

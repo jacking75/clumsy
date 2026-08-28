@@ -21,10 +21,18 @@ void initPacketNodeList() {
 
 // TODO  using malloc in the loop is not good for performance
 //       just not sure I can write a better memory allocator
+// Returns NULL when memory runs out. The callers (the capture read loop and
+// duplicate.cpp) treat that as "drop this packet", which is a far better
+// outcome under memory pressure than dereferencing NULL in the hot path.
 PacketNode* createNode(char* buf, UINT len, const PacketMeta *meta,
                        const void *backendMeta) {
     PacketNode *newNode = (PacketNode*)malloc(sizeof(PacketNode));
+    if (!newNode) return NULL;
     newNode->packet = (char*)malloc(len);
+    if (!newNode->packet) {
+        free(newNode);
+        return NULL;
+    }
     memcpy(newNode->packet, buf, len);
     newNode->packetLen = len;
     if (meta) {
@@ -39,13 +47,19 @@ PacketNode* createNode(char* buf, UINT len, const PacketMeta *meta,
     } else {
         memset(newNode->backend.raw, 0, PACKET_BACKEND_META_SIZE);
     }
-    newNode->timestamp = 0;
+    // Both timing fields start at zero. lag/jitter always write enqueueTime
+    // before anything reads it, but leaving one of the two uninitialised is
+    // the sort of asymmetry that turns into a garbage latency sample the first
+    // time some other code path looks at it.
+    newNode->timestamp   = 0;
+    newNode->enqueueTime = 0;
     newNode->next = newNode->prev = NULL;
     return newNode;
 }
 
 PacketNode* cloneNode(const PacketNode *src) {
     PacketNode *copy = createNode(src->packet, src->packetLen, &(src->meta), NULL);
+    if (!copy) return NULL;
     packetBackendPrepareClone(src, copy);
     return copy;
 }

@@ -19,9 +19,14 @@
 //   {"cmd":"get_profiles"} {"cmd":"profile","name":"mobile-4g"}
 //   {"cmd":"scenario","action":"load","path":"s.json"}
 //   {"cmd":"pcap","action":"start","path":"out.pcap"}
+//   {"cmd":"replay","action":"start","path":"in.pcap"}
+//   {"cmd":"metrics"}              — Prometheus text, inside "metrics"
 //   {"cmd":"quit"}
 //
-// Responses always include "status":"ok" or "status":"error","message":"..."
+// Responses always include "status":"ok" or "status":"error","message":"...".
+// That holds for every command without exception: "metrics" returns the
+// Prometheus exposition text as a JSON string field rather than raw, so a
+// client can parse every reply the same way. Scrapers want GET /metrics.
 
 #include <stdlib.h>
 #include <stdio.h>
@@ -30,6 +35,27 @@
 
 #include "common.h"
 #include "controlapi.h"
+
+// A scenario or profile body is easily larger than one read buffer, so the
+// request is accumulated rather than truncated at the buffer boundary. The cap
+// matches the HTTP server's REQUEST_MAX_BYTES so both transports refuse the
+// same thing, and going over it produces a real error reply instead of a
+// silently truncated command or a dropped connection.
+#define CONTROL_MAX_REQUEST 262144
+
+// How much a refused request may still be read and thrown away. A message-mode
+// pipe has to be drained to its end before the server answers: replying while
+// the client is still writing leaves FlushFileBuffers() waiting for a client
+// that is itself waiting for the pipe buffer to drain, and the server thread
+// never gets back to accepting connections. Past this much, the connection is
+// dropped without an answer instead.
+#define CONTROL_MAX_DRAIN (8 * 1024 * 1024)
+
+// The one reply that cannot come from controlDispatchJson(), because the
+// request never got far enough to be parsed.
+static const char *TOO_LARGE_JSON =
+    "{\"status\":\"error\",\"message\":\"request exceeds the "
+    STR(CONTROL_MAX_REQUEST) " byte limit\"}";
 
 // Both platforms expose the same request/response protocol; only the transport
 // primitive differs. Windows uses a Named Pipe, POSIX a Unix domain socket at
@@ -83,15 +109,52 @@ static DWORD WINAPI pipeServerLoop(LPVOID arg) {
             continue;
         }
 
-        // read the JSON request
-        memset(reqBuf, 0, sizeof(reqBuf));
-        ok = ReadFile(hPipe, reqBuf, sizeof(reqBuf) - 1, &bytesRead, NULL);
-        if (ok && bytesRead > 0) {
-            std::string response;
-            LOG("pipe recv: %s", reqBuf);
-            response = controlDispatchJson(std::string(reqBuf, bytesRead));
-            WriteFile(hPipe, response.c_str(), (DWORD)response.size(), &bytesWritten, NULL);
-            LOG("pipe sent: %s", response.c_str());
+        // Read the JSON request. A message larger than reqBuf comes back as
+        // ERROR_MORE_DATA with the buffer full, which the old code treated the
+        // same as "nothing to read" - it hung up without a reply and the
+        // client saw a broken pipe instead of an explanation.
+        {
+            std::string request, response;
+            unsigned long long drained = 0;
+            int tooLarge = 0, cutOff = 0;
+
+            for (;;) {
+                bytesRead = 0;
+                ok = ReadFile(hPipe, reqBuf, sizeof(reqBuf), &bytesRead, NULL);
+                drained += bytesRead;
+                if (bytesRead > 0 && !tooLarge) {
+                    request.append(reqBuf, bytesRead);
+                    if (request.size() > (size_t)CONTROL_MAX_REQUEST) {
+                        // Over the limit: stop storing, but keep reading (see
+                        // CONTROL_MAX_DRAIN) so the client can finish its write
+                        // and then read the refusal.
+                        tooLarge = 1;
+                        request.clear();
+                    }
+                }
+                if (ok) break;                                  // whole message read
+                if (GetLastError() != ERROR_MORE_DATA) break;   // a real failure
+                if (drained > CONTROL_MAX_DRAIN) { cutOff = 1; break; }
+            }
+
+            if (cutOff) {
+                INFO("pipe: dropping a request that exceeded %d bytes without "
+                     "ending.", CONTROL_MAX_DRAIN);
+            } else if (tooLarge) {
+                INFO("pipe: refusing a request of %llu bytes (limit %d).",
+                     drained, CONTROL_MAX_REQUEST);
+                response = TOO_LARGE_JSON;
+            } else if (!request.empty()) {
+                LOG("pipe recv: %s", request.c_str());
+                response = controlDispatchJson(request);
+            }
+
+            if (!response.empty()) {
+                bytesWritten = 0;
+                WriteFile(hPipe, response.c_str(), (DWORD)response.size(),
+                          &bytesWritten, NULL);
+                LOG("pipe sent: %s", response.c_str());
+            }
         }
 
         FlushFileBuffers(hPipe);
@@ -143,6 +206,50 @@ void pipeServerStop(void) {
 #include <unistd.h>
 
 #define SOCKET_BUF_SIZE 8192
+// Bounds one client's turn on the single-threaded accept loop.
+#define CONTROL_RECV_TIMEOUT_MS 15000
+
+// Writes the whole reply. send() is free to accept only part of it - a signal
+// during the call is enough - and stopping at the first short write would hand
+// the client a truncated JSON object.
+static int sendAllBytes(int fd, const char *buf, size_t len) {
+    size_t sent = 0;
+    while (sent < len) {
+        const ssize_t n = send(fd, buf + sent, len - sent, MSG_NOSIGNAL);
+        if (n > 0) { sent += (size_t)n; continue; }
+        if (n < 0 && errno == EINTR) continue;
+        return 0;
+    }
+    return 1;
+}
+
+// Whether the accumulated text is a complete JSON value: braces and brackets
+// balanced, quotes and escapes accounted for.
+//
+// Windows message-mode pipes frame the request for us; a Unix stream socket
+// does not, and a client that sends its request and then waits for the answer
+// never closes its end. Without this the read loop would sit on the receive
+// timeout for every single command.
+static int jsonLooksComplete(const std::string &text) {
+    int  depth = 0;
+    bool inStr = false, esc = false, sawStructure = false;
+
+    for (size_t i = 0; i < text.size(); ++i) {
+        const char c = text[i];
+        if (inStr) {
+            if (esc)            esc = false;
+            else if (c == '\\') esc = true;
+            else if (c == '"')  inStr = false;
+            continue;
+        }
+        if (c == '"') { inStr = true; sawStructure = true; continue; }
+        if (c == '{' || c == '[') { ++depth; sawStructure = true; continue; }
+        if (c == '}' || c == ']') {
+            if (--depth <= 0) return sawStructure;
+        }
+    }
+    return 0;
+}
 // /run is tmpfs on any modern distro, so a stale socket never survives a reboot.
 // Falls back to /tmp when clumsy is running unprivileged.
 #define SOCKET_PATH_PRIMARY  "/run/clumsy.sock"
@@ -178,18 +285,62 @@ static DWORD socketServerLoop(LPVOID arg) {
             continue;
         }
 
-        memset(reqBuf, 0, sizeof(reqBuf));
-        got = recv(clientFd, reqBuf, sizeof(reqBuf) - 1, 0);
-        if (got > 0) {
-            std::string response;
-            LOG("control socket recv: %s", reqBuf);
-            response = controlDispatchJson(std::string(reqBuf, (size_t)got));
+        // This loop is the only thing serving the control socket, so a client
+        // that connects and then says nothing must not be able to wedge it.
+        {
+            struct timeval tv;
+            tv.tv_sec  = CONTROL_RECV_TIMEOUT_MS / 1000;
+            tv.tv_usec = (CONTROL_RECV_TIMEOUT_MS % 1000) * 1000;
+            setsockopt(clientFd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+            setsockopt(clientFd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
+        }
+
+        {
+            std::string request, response;
+
+            // A stream socket splits and coalesces freely, so one recv() is not
+            // one request: keep reading until the JSON is balanced. The old
+            // single read silently dropped everything past 8191 bytes and then
+            // failed to parse what was left, reporting "malformed JSON" for a
+            // request that was perfectly well formed.
+            unsigned long long drained = 0;
+            int tooLarge = 0;
+
+            for (;;) {
+                got = recv(clientFd, reqBuf, sizeof(reqBuf), 0);
+                if (got <= 0) break;
+                drained += (unsigned long long)got;
+                if (!tooLarge) {
+                    request.append(reqBuf, (size_t)got);
+                    if (request.size() > (size_t)CONTROL_MAX_REQUEST) {
+                        // Keep reading rather than answering into a socket the
+                        // client is still filling; SO_RCVTIMEO bounds the wait.
+                        tooLarge = 1;
+                        request.clear();
+                    }
+                } else if (drained > CONTROL_MAX_DRAIN) {
+                    break;
+                }
+                if (!tooLarge && jsonLooksComplete(request)) break;
+            }
+
+            if (tooLarge) {
+                INFO("control socket: refusing a request of %llu bytes (limit %d).",
+                     drained, CONTROL_MAX_REQUEST);
+                response = TOO_LARGE_JSON;
+            } else if (!request.empty()) {
+                LOG("control socket recv: %s", request.c_str());
+                response = controlDispatchJson(request);
+            }
+
             // Best effort: a client that hung up mid-exchange is not an error
             // worth reporting, the command already ran.
-            if (send(clientFd, response.c_str(), response.size(), MSG_NOSIGNAL) < 0) {
-                LOG("control socket: client went away before the reply");
+            if (!response.empty()) {
+                if (!sendAllBytes(clientFd, response.c_str(), response.size())) {
+                    LOG("control socket: client went away before the reply");
+                }
+                LOG("control socket sent: %s", response.c_str());
             }
-            LOG("control socket sent: %s", response.c_str());
         }
 
         close(clientFd);

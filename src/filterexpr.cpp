@@ -563,7 +563,16 @@ void collect(const FilterProgram *prog, int idx, Constraints &c, bool negated) {
     case N_CMP:
         if (negated || n.op != OP_EQ) { c.widened = true; return; }
         switch (n.field) {
-        case F_IP_PROTO:     c.proto   = (int)n.value;  break;
+        case F_IP_PROTO:
+            c.proto = (int)n.value;
+            // Some protocol numbers only exist on one side of the family:
+            // ICMP (1) is IPv4, ICMPv6 (58) is IPv6. Pinning the version here
+            // is what stops "--filter icmpv6" from producing an
+            // "iptables -p 58" rule that matches nothing on IPv4 while the
+            // real ICMPv6 traffic never reaches the queue at all.
+            if (c.proto == 1)  c.ipv6 = 0;
+            if (c.proto == 58) c.ipv6 = 1;
+            break;
         case F_TCP_SRCPORT:  c.proto = 6;  c.srcPort = (long)n.value; break;
         case F_TCP_DSTPORT:  c.proto = 6;  c.dstPort = (long)n.value; break;
         case F_UDP_SRCPORT:  c.proto = 17; c.srcPort = (long)n.value; break;
@@ -575,14 +584,20 @@ void collect(const FilterProgram *prog, int idx, Constraints &c, bool negated) {
     }
 }
 
+// Hard stop on pathological nesting. Well above MAX_DERIVED_RULES on purpose:
+// the caller needs to be able to tell "eight branches" from "more branches than
+// there is room for", and the old code could not, because it stopped splitting
+// once `out` was full and then quietly dropped whatever was left over.
+#define SPLIT_BRANCH_LIMIT 64
+
 // Splits the top level on OR so each branch becomes its own rule; an OR of two
 // ports is extremely common ("port 7777 in either direction") and one rule per
 // branch keeps those precise.
 void splitOr(const FilterProgram *prog, int idx, std::vector<int> &out, int depth) {
     if (idx < 0 || idx >= (int)prog->nodes.size()) return;
+    if (out.size() >= SPLIT_BRANCH_LIMIT) return;
     const Node &n = prog->nodes[(size_t)idx];
-    // Bail out of pathological nesting rather than generating hundreds of rules.
-    if (n.kind == N_OR && depth < 4 && out.size() < MAX_DERIVED_RULES) {
+    if (n.kind == N_OR && depth < 16) {
         splitOr(prog, n.left,  out, depth + 1);
         splitOr(prog, n.right, out, depth + 1);
         return;
@@ -596,28 +611,34 @@ void formatAddr(UINT32 addr, char *buf, size_t bufSize) {
              (addr >> 8) & 0xFF, addr & 0xFF);
 }
 
-void buildMatch(const Constraints &c, char *out, size_t outSize) {
+// ipv6 selects the spelling iptables and ip6tables disagree on; everything
+// else is identical between the two.
+void buildMatch(const Constraints &c, int ipv6, char *out, size_t outSize) {
     char buf[256];
+    const int size = (int)sizeof(buf);
     int pos = 0;
     buf[0] = '\0';
 
-    if (c.proto == 6)       pos += snprintf(buf + pos, sizeof(buf) - pos, "-p tcp ");
-    else if (c.proto == 17) pos += snprintf(buf + pos, sizeof(buf) - pos, "-p udp ");
-    else if (c.proto == 1)  pos += snprintf(buf + pos, sizeof(buf) - pos, "-p icmp ");
-    else if (c.proto > 0)   pos += snprintf(buf + pos, sizeof(buf) - pos, "-p %d ", c.proto);
+    if (c.proto == 6)                    pos = appendf(buf, size, pos, "-p tcp ");
+    else if (c.proto == 17)              pos = appendf(buf, size, pos, "-p udp ");
+    else if (c.proto == 1 && !ipv6)      pos = appendf(buf, size, pos, "-p icmp ");
+    else if (c.proto == 58 && ipv6)      pos = appendf(buf, size, pos, "-p icmpv6 ");
+    else if (c.proto > 0)                pos = appendf(buf, size, pos, "-p %d ", c.proto);
 
     // Ports need a protocol; without one iptables rejects --dport.
     if (c.proto == 6 || c.proto == 17) {
-        if (c.dstPort >= 0) pos += snprintf(buf + pos, sizeof(buf) - pos, "--dport %ld ", c.dstPort);
-        if (c.srcPort >= 0) pos += snprintf(buf + pos, sizeof(buf) - pos, "--sport %ld ", c.srcPort);
+        if (c.dstPort >= 0) pos = appendf(buf, size, pos, "--dport %ld ", c.dstPort);
+        if (c.srcPort >= 0) pos = appendf(buf, size, pos, "--sport %ld ", c.srcPort);
     }
+    // Address literals are dotted IPv4 only, and collect() pins ipv6 = 0 the
+    // moment it sees one, so these never reach an ip6tables rule.
     if (c.srcAddr) {
         char a[32]; formatAddr(c.srcAddr, a, sizeof(a));
-        pos += snprintf(buf + pos, sizeof(buf) - pos, "-s %s ", a);
+        pos = appendf(buf, size, pos, "-s %s ", a);
     }
     if (c.dstAddr) {
         char a[32]; formatAddr(c.dstAddr, a, sizeof(a));
-        pos += snprintf(buf + pos, sizeof(buf) - pos, "-d %s ", a);
+        pos = appendf(buf, size, pos, "-d %s ", a);
     }
 
     // Trim the trailing space so the assembled command line stays tidy.
@@ -625,10 +646,57 @@ void buildMatch(const Constraints &c, char *out, size_t outSize) {
     snprintf(out, outSize, "%s", buf);
 }
 
+// Turns one AND-chain into the rule(s) it needs, appended to out.
+void emitRules(const FilterProgram *prog, int branch,
+               std::vector<IptablesRule> &out, int *exact) {
+    Constraints c;
+    collect(prog, branch, c, false);
+    if (c.widened && exact) *exact = 0;
+
+    // An expression that never pins the IP version has to produce rules for
+    // both. "Unknown" silently becoming "IPv4" was the one place this
+    // translation narrowed instead of widening, and it still reported the
+    // result as exact - so running with no --filter at all installed iptables
+    // rules only, and every IPv6 packet on the host passed by untouched.
+    const bool wantV4 = (c.ipv6 != 1);
+    const bool wantV6 = (c.ipv6 != 0);
+
+    for (int v6 = 0; v6 <= 1; ++v6) {
+        IptablesRule r;
+        if (v6 == 0 && !wantV4) continue;
+        if (v6 == 1 && !wantV6) continue;
+        r.chains = c.chains;
+        r.ipv6   = v6;
+        buildMatch(c, v6, r.match, sizeof(r.match));
+        out.push_back(r);
+    }
+}
+
+// An OR of two ports on the same protocol often collapses to identical match
+// strings once direction is folded in.
+void dedupeRules(std::vector<IptablesRule> &v) {
+    std::vector<IptablesRule> uniq;
+    for (size_t i = 0; i < v.size(); ++i) {
+        bool dup = false;
+        for (size_t j = 0; j < uniq.size(); ++j) {
+            if (uniq[j].chains == v[i].chains && uniq[j].ipv6 == v[i].ipv6 &&
+                strcmp(uniq[j].match, v[i].match) == 0) {
+                dup = true;
+                break;
+            }
+        }
+        if (!dup) uniq.push_back(v[i]);
+    }
+    v.swap(uniq);
+}
+
 } // namespace
 
 int filterDeriveIptables(const FilterProgram *prog, IptablesRule *rules,
                          int maxRules, int *exact) {
+    int localExact = 1;
+    int count = 0;
+
     if (exact) *exact = 1;
     if (!prog || !rules || maxRules <= 0) return 0;
 
@@ -636,32 +704,32 @@ int filterDeriveIptables(const FilterProgram *prog, IptablesRule *rules,
     if (prog->root >= 0) splitOr(prog, prog->root, branches, 0);
     if (branches.empty()) branches.push_back(prog->root);
 
-    int count = 0;
-    for (size_t i = 0; i < branches.size() && count < maxRules; ++i) {
-        Constraints c;
-        collect(prog, branches[i], c, false);
-        if (c.widened && exact) *exact = 0;
+    std::vector<IptablesRule> derived;
+    for (size_t i = 0; i < branches.size(); ++i) {
+        emitRules(prog, branches[i], derived, &localExact);
+    }
+    dedupeRules(derived);
 
-        rules[count].chains = c.chains;
-        rules[count].ipv6   = (c.ipv6 == 1) ? 1 : 0;
-        buildMatch(c, rules[count].match, sizeof(rules[count].match));
-        ++count;
+    if (derived.size() > (size_t)maxRules) {
+        // More rules than there is room for. Emitting the first maxRules and
+        // dropping the rest would *narrow* the result, and this file's whole
+        // contract is that derived rules are a superset: under-capturing
+        // silently misses the traffic under test while still reporting
+        // success. Fall back to a single derivation over the un-split
+        // expression - collect() cannot express a top-level OR, so it widens
+        // to "everything", which is safe and is flagged as inexact.
+        INFO("auto-iptables: the filter needs %d rules but only %d fit; "
+             "falling back to one wide rule and letting clumsy's own filter "
+             "do the selecting.", (int)derived.size(), maxRules);
+        derived.clear();
+        localExact = 0;
+        emitRules(prog, prog->root, derived, NULL);
+        dedupeRules(derived);
     }
 
-    // Deduplicate: an OR of two ports on the same protocol often collapses to
-    // identical match strings once direction is folded in.
-    int unique = 0;
-    for (int i = 0; i < count; ++i) {
-        bool dup = false;
-        for (int j = 0; j < unique; ++j) {
-            if (rules[j].chains == rules[i].chains &&
-                rules[j].ipv6 == rules[i].ipv6 &&
-                strcmp(rules[j].match, rules[i].match) == 0) {
-                dup = true;
-                break;
-            }
-        }
-        if (!dup) rules[unique++] = rules[i];
+    for (size_t i = 0; i < derived.size() && count < maxRules; ++i) {
+        rules[count++] = derived[i];
     }
-    return unique;
+    if (exact) *exact = localExact;
+    return count;
 }

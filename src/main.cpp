@@ -347,7 +347,9 @@ static void setErr(char *errBuf, int errSize, const char *msg) {
 // against the main tick loop, which is the only other writer of this state.
 int appStartCapture(const char *filter, const char *procName,
                     char *errBuf, int errSize) {
-    char combinedFilter[FILTER_BUFSIZE * 2];
+    // User filter + optional process port fragment + the impostor clause below,
+    // each with room to spare rather than a silent truncation at the boundary.
+    char combinedFilter[FILTER_BUFSIZE * 2 + 64];
     char divertMsg[MSG_BUFSIZE];
     int ok = 0;
 
@@ -379,25 +381,49 @@ int appStartCapture(const char *filter, const char *procName,
     }
 
     // build combined filter: user filter + optional process port filter
-    if (procName && procName[0] != '\0') {
+    {
         char procFragment[FILTER_BUFSIZE];
-        char errMsg[MSG_BUFSIZE];
-        int result = buildProcessFilter(procName, procFragment, sizeof(procFragment),
-                                        errMsg, sizeof(errMsg));
-        if (result < 0) {
-            setErr(errBuf, errSize, errMsg);
-            LeaveCriticalSection(&appLock);
-            return 0;
+        const char *impostorClause = "";
+
+        procFragment[0] = '\0';
+        if (procName && procName[0] != '\0') {
+            char errMsg[MSG_BUFSIZE];
+            int result = buildProcessFilter(procName, procFragment, sizeof(procFragment),
+                                            errMsg, sizeof(errMsg));
+            if (result < 0) {
+                setErr(errBuf, errSize, errMsg);
+                LeaveCriticalSection(&appLock);
+                return 0;
+            }
+            if (result > 0) INFO("Process filter: %s (%d ports)", procName, result);
+            else            procFragment[0] = '\0';
         }
-        if (result > 0) {
-            snprintf(combinedFilter, sizeof(combinedFilter), "(%s)%s", filter, procFragment);
-            INFO("Process filter: %s (%d ports)", procName, result);
-        } else {
-            snprintf(combinedFilter, sizeof(combinedFilter), "%s", filter);
-        }
-    } else {
-        snprintf(combinedFilter, sizeof(combinedFilter), "%s", filter);
+
+#if defined(_WIN32)
+        // Replayed packets leave through a separate send-only WinDivert handle,
+        // so - unlike the clones duplicate.cpp sends on the capture handle -
+        // they come straight back in through this filter, get shaped a second
+        // time, and are counted twice in /api/stats, --pcap-out and the HTML
+        // report. Nobody wants clumsy to degrade its own output, so impostors
+        // are excluded by default. Naming "impostor" in your own filter turns
+        // this off, which is the way to capture another WinDivert tool's
+        // injected traffic on purpose.
+        if (!strstr(filter, "impostor")) impostorClause = " and not impostor";
+#endif
+
+        // The user filter is parenthesised before anything is appended: "and"
+        // binds tighter than "or", so "outbound or inbound" plus a bare
+        // "and not impostor" would silently become
+        // "outbound or (inbound and not impostor)".
+        snprintf(combinedFilter, sizeof(combinedFilter), "(%s)%s%s",
+                 filter, procFragment, impostorClause);
     }
+
+    // Before divertStart(), not after: it spawns the read and clock loops
+    // already running, and with lag or jitter left enabled from a previous run
+    // the first packets can reach latencyRecord() while this thread is still
+    // on its way to the reset - which would then throw those samples away.
+    statsReset();
 
     divertMsg[0] = '\0';
     if (divertStart(combinedFilter, divertMsg)) {
@@ -412,11 +438,12 @@ int appStartCapture(const char *filter, const char *procName,
         setErr(errBuf, errSize, divertMsg);
     }
 
-    LeaveCriticalSection(&appLock);
-
     if (ok) {
-        char buf[MSG_BUFSIZE];
-        statsReset();
+        // Started under appLock, exactly as appStopCapture() stops them.
+        // statslog.cpp and pcapexport.cpp are only as thread-safe as their
+        // callers make them, so opening a log file outside the lock would let
+        // a stop request arriving on another HTTP worker close the FILE* this
+        // thread is still writing to - or miss it entirely and leak it.
         reportSessionStart(combinedFilter);
 
         // start stats log if --stats-log was given
@@ -434,7 +461,12 @@ int appStartCapture(const char *filter, const char *procName,
             }
         }
         scenarioStart();
+    }
 
+    LeaveCriticalSection(&appLock);
+
+    if (ok) {
+        char buf[MSG_BUFSIZE];
         // The filter can be up to FILTER_BUFSIZE; cap what goes into the
         // MSG_BUFSIZE status line rather than letting snprintf truncate blindly.
         snprintf(buf, MSG_BUFSIZE, "Capturing. filter=\"%.400s\"%s%.64s", filter,
@@ -627,6 +659,8 @@ int main(int argc, char* argv[]) {
     pcapExportInit();
     pcapReplayInit();
     reportInit();
+    latencyInit();
+    profileInit();
     srand((unsigned int)time(NULL));
 
     if (argc > 1) {

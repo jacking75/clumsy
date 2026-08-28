@@ -27,14 +27,26 @@ struct PlatformHandle {
     LPVOID     arg;
     int        joined;
     volatile int finished;
+    // Two owners for a thread handle: the caller that got it back from
+    // CreateThread, and the running thread itself. Win32 lets the caller close
+    // the handle while the thread is still going (httpserver.cpp does exactly
+    // that for every connection), so the storage can only be released once
+    // both have let go - freeing it at CloseHandle time is a use-after-free
+    // against the trampoline's own bookkeeping.
+    volatile int refs;
     // mutex
     pthread_mutex_t mutex;
 };
+
+void releaseHandle(PlatformHandle *h) {
+    if (__atomic_sub_fetch(&h->refs, 1, __ATOMIC_SEQ_CST) == 0) free(h);
+}
 
 void* threadTrampoline(void *raw) {
     PlatformHandle *h = static_cast<PlatformHandle *>(raw);
     h->fn(h->arg);
     __atomic_store_n(&h->finished, 1, __ATOMIC_SEQ_CST);
+    releaseHandle(h);
     return nullptr;
 }
 
@@ -71,6 +83,7 @@ HANDLE CreateThread(void *attrs, size_t stackSize, LPTHREAD_START_ROUTINE fn,
     h->kind = HANDLE_THREAD;
     h->fn   = fn;
     h->arg  = arg;
+    h->refs = 2;    // this caller + the thread about to start
 
     pthread_attr_t attr;
     pthread_attr_init(&attr);
@@ -114,10 +127,21 @@ DWORD WaitForSingleObject(HANDLE handle, DWORD timeoutMs) {
 
 DWORD WaitForMultipleObjects(DWORD count, const HANDLE *handles, BOOL waitAll,
                              DWORD timeoutMs) {
-    // clumsy only ever calls this as (2, threads, TRUE, INFINITE).
+    // clumsy only ever calls this with waitAll = TRUE: divert*.cpp joins its
+    // read and clock threads together, sometimes with a bounded timeout
+    // ("anything longer means a backend call is wedged"). On Win32 that
+    // timeout caps the *whole* call, so each handle gets what is left of the
+    // budget rather than a fresh allowance - otherwise a 5s wait on two
+    // handles could take 10s and the caller's deadline would mean nothing.
+    const DWORD start = platformTickCount();
     UNREFERENCED_PARAMETER(waitAll);
     for (DWORD i = 0; i < count; ++i) {
-        const DWORD rc = WaitForSingleObject(handles[i], timeoutMs);
+        DWORD remaining = INFINITE;
+        if (timeoutMs != INFINITE) {
+            const DWORD spent = platformTickCount() - start;
+            remaining = (spent >= timeoutMs) ? 0 : (timeoutMs - spent);
+        }
+        const DWORD rc = WaitForSingleObject(handles[i], remaining);
         if (rc != WAIT_OBJECT_0) return rc;
     }
     return WAIT_OBJECT_0;
@@ -129,11 +153,15 @@ BOOL CloseHandle(HANDLE handle) {
 
     if (h->kind == HANDLE_MUTEX) {
         pthread_mutex_destroy(&h->mutex);
-    } else if (!h->joined) {
-        // Detach rather than leak the pthread when the caller never waited.
-        pthread_detach(h->thread);
+        free(h);
+        return TRUE;
     }
-    free(h);
+
+    // Detach rather than leak the pthread when the caller never waited. This
+    // only reclaims the kernel/pthread resources; the handle storage below is
+    // still shared with a thread that may be mid-flight.
+    if (!h->joined) pthread_detach(h->thread);
+    releaseHandle(h);
     return TRUE;
 }
 

@@ -224,6 +224,11 @@ clumsy.exe --filter "udp and outbound" --lag on --lag-time 100 --drop on --drop-
 | `POST /api/pcap/start` / `stop` | pcap 덤프 제어 |
 | `POST /api/replay/start` / `stop` | 저장된 pcap 재생 제어 |
 
+재생 중인 패킷은 다시 캡처되지 않습니다. Windows에서는 캡처 필터에
+`and not impostor`가 자동으로 붙고(필터에 `impostor`를 직접 쓰면 비활성화),
+Linux에서는 `--auto-iptables on`이 IPv4·IPv6 양쪽에 설치하는 fwmark ACCEPT
+규칙이 같은 역할을 합니다.
+
 예시:
 
 ```bash
@@ -250,6 +255,7 @@ scrape_configs:
 ```promql
 rate(clumsy_module_affected_packets_total[1m])              # 모듈별 초당 처리량
 histogram_quantile(0.95, rate(clumsy_latency_ms_bucket[5m])) # 지연 p95
+rate(clumsy_corrupt_flipped_bits_total[1m])                  # 실제 적용된 비트 오류율
 clumsy_capturing == 0                                        # 멈춘 인스턴스 찾기
 ```
 
@@ -341,8 +347,7 @@ clumsy/
 │   ├── CODING_STYLE.md # 코드 스타일 원칙
 │   └── LINUX.md        # 리눅스 빌드/실행/제약 가이드
 ├── Makefile            # 리눅스 빌드
-├── manual.md           # 사용자 매뉴얼 (한국어)
-└── TODO.md             # 개발 로드맵
+└── manual.md           # 사용자 매뉴얼 (한국어)
 ```
 
 
@@ -351,7 +356,7 @@ clumsy/
 - **사용자 매뉴얼**: [manual.md](manual.md) — 전체 기능, 웹 UI, CLI, API 상세 설명
 - **리눅스 가이드**: [docs/LINUX.md](docs/LINUX.md) — 빌드, 권한, iptables 연동, 플랫폼 차이
 - **코드 스타일**: [docs/CODING_STYLE.md](docs/CODING_STYLE.md) — C++ 전환 이후 코드 규칙
-- **개발 로드맵**: [TODO.md](TODO.md) — 완료된 작업 및 향후 계획
+- **개발 로드맵**: [docs/ROADMAP-v2.md](docs/ROADMAP-v2.md) — 완료된 작업 및 향후 계획
 
 
 ## 라이선스

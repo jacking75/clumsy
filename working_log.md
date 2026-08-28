@@ -1,5 +1,40 @@
 # Working Log
 
+## 2026-08-28 18:59 KST — CODE_REVIEW.md 지적사항 36건 전량 수정
+
+- 1차 리뷰 14건(#1~#14, ROADMAP-v2 신규 코드) + 2차 리뷰 22건(A1~A3/B1~B5/C1~C3/
+  D1~D4/E1~E3/F1~F4, 기존 파일 전체)을 모두 반영. `src/` 30개 파일 +1185/-320.
+- Critical: pcapReplayStop 동시 호출 레이스와 join 타임아웃(재생 스레드가 백엔드를
+  직접 정리하도록 소유권 이전), Linux IPv6 재생 체크섬 파괴(`IPV6_HDRINCL` 적용,
+  미지원 커널은 경고), `platform_linux.cpp`의 CloseHandle UAF(핸들 참조 카운트 —
+  HTTP 연결마다 발생하던 것), `ip6tables` fwmark ACCEPT 규칙 누락(IPv6 duplicate
+  무한 증폭), `GET  HTTP/1.1`(공백 2개) 한 방에 프로세스가 죽던 문제(빈 target 거부
+  + serveStatic 경계 + connectionThread try/catch, MSVC `/EHsc` 활성화),
+  `procfilter_linux.cpp` 스택 오버플로(clamp하는 공용 `appendf()`로 교체).
+- 락/순서: latency 히스토그램에 `latencyLock`, profile 배열에 `profileLock`(+스냅샷
+  API), pcap 경로/카운터 getter를 `pcapLock` 안으로, `statsLogStart()`를 `appLock`
+  안으로, `statsReset()`을 `divertStart()` 앞으로 이동.
+- 계약/정확성: Named Pipe `metrics`가 JSON 봉투로 반환, `apiReplayStop`이 join 후
+  카운트, 필터 IP 버전 미상 시 v4/v6 규칙을 모두 생성(+icmp/icmpv6 버전 고정),
+  OR 분기 초과 시 조용히 누락하는 대신 넓은 규칙으로 폴백, `double`→`long long`
+  캐스트 전 범위 검사(UB), reset의 `>` → `>=`, Windows에서 `--filter`에
+  `and not impostor` 자동 추가(재생 트래픽 이중 집계 제거).
+- 정리: `randUnit()`을 `utils.cpp`로 통합(corrupt/jitter 중복 제거), corrupt의
+  비트 반전 수를 `/api/stats`·`/metrics`·HTML 리포트에 노출, `enqueueTime` 초기화,
+  `createNode()` malloc 검사, 플러그인 Module 필드 검증, pipe 8KB 초과 요청 처리
+  (256KB까지 수용 + 초과 시 명시적 오류, 응답 전 드레인으로 데드락 회피).
+- 검증: Windows Release/Debug 재빌드 경고 0·오류 0, WSL2 g++-16 클린 빌드 경고 0,
+  `make test` 51개 + `tests/linux/api_test.sh` 57개 전부 통과. `GET  HTTP/1.1`
+  크래시·slowloris 15초 데드라인·파이프 20KB/300KB 요청·metrics JSON 봉투는
+  실행 중인 바이너리로 직접 재현 확인.
+- 문서: `README.md`/`README_kr.md`/`manual.md`/`docs/LINUX.md`에 impostor 자동 추가,
+  파이프 metrics 응답 형식, corrupt 비트 카운터, ip6tables fwmark 규칙, IPv6 재생
+  헤더 보존을 반영.
+- 정리: 로컬 스크래치 문서 `CODE_REVIEW.md`와 완료된 로드맵 `TODO.md` 삭제. TODO.md를
+  가리키던 링크 7곳(`CLAUDE.md`, `docs/CODING_STYLE.md`, `docs/ROADMAP-v2.md`,
+  `README.md`, `README_kr.md`, `tests/README.md`)은 `docs/ROADMAP-v2.md`·
+  `docs/LINUX.md`·`working_log.md`로 재연결하거나 내용을 인라인으로 옮김.
+
 ## 2026-08-28 14:43 KST — README 영문화 + 가이드에 설치 위치 안내 추가
 
 - `README.md`를 영어로 전면 번역하고, 기존 한국어 원문은 `README_kr.md`로 분리 보존.

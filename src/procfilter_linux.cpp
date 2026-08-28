@@ -187,15 +187,24 @@ int buildProcessFilter(const char *processName, char *filterBuf, int bufSize,
 
     // Same fragment shape the Windows build produces, so the combined filter
     // string is identical on both platforms.
-    pos += snprintf(filterBuf + pos, (size_t)(bufSize - pos), " and (");
+    //
+    // appendf() clamps, which matters here: one fragment runs to about 100
+    // bytes with five-digit ports, so accumulating raw snprintf return values
+    // against a 64-byte margin could leave pos past the end of the buffer, and
+    // the unguarded closing ")" would then be written outside the caller's
+    // stack array. The margin is 120 to match the Windows side as well.
+    pos = appendf(filterBuf, bufSize, pos, " and (");
     for (int i = 0; i < portCount; ++i) {
-        if (pos >= bufSize - 64) break;
-        pos += snprintf(filterBuf + pos, (size_t)(bufSize - pos),
-                        "%stcp.SrcPort == %u or tcp.DstPort == %u or "
-                        "udp.SrcPort == %u or udp.DstPort == %u",
-                        i ? " or " : "", ports[i], ports[i], ports[i], ports[i]);
+        if (pos >= bufSize - 120) {
+            LOG("procfilter: filter truncated at %d/%d ports", i, portCount);
+            break;
+        }
+        pos = appendf(filterBuf, bufSize, pos,
+                      "%stcp.SrcPort == %u or tcp.DstPort == %u or "
+                      "udp.SrcPort == %u or udp.DstPort == %u",
+                      i ? " or " : "", ports[i], ports[i], ports[i], ports[i]);
     }
-    snprintf(filterBuf + pos, (size_t)(bufSize - pos), ")");
+    appendf(filterBuf, bufSize, pos, ")");
 
     return portCount;
 }

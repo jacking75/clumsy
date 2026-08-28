@@ -63,11 +63,6 @@ static void jitterCloseDown(PacketNode *head, PacketNode *tail) {
     endTimePeriod();
 }
 
-// Uniform in (0,1). The half-step keeps log() away from an exact zero.
-static INLINE_FUNCTION double jitterUrand(void) {
-    return ((double)rand() + 0.5) / ((double)RAND_MAX + 1.0);
-}
-
 // Draws one delay in ms from [lo, hi] under the selected distribution.
 //
 // Both shaped distributions are scaled so their useful mass lands inside the
@@ -84,7 +79,7 @@ static DWORD jitterSampleDelay(short lo, short hi, short dist) {
     case DIST_NORMAL: {
         // Box-Muller. Centre the mean and take sigma = range/6, so ~99.7% of
         // the draws already fall inside [lo, hi] before any clamping.
-        double u1 = jitterUrand(), u2 = jitterUrand();
+        double u1 = randUnit(), u2 = randUnit();
         double z  = sqrt(-2.0 * log(u1)) * cos(2.0 * 3.14159265358979323846 * u2);
         v = ((double)lo + (double)hi) / 2.0 + z * (range / 6.0);
         break;
@@ -93,12 +88,12 @@ static DWORD jitterSampleDelay(short lo, short hi, short dist) {
         // Long tail: mostly near lo, occasionally out to hi. Shape 2 puts the
         // median near lo + 0.29*range and leaves a visible upper tail.
         // pow() returns [1, inf), so (1 - 1/p) maps it onto [0, 1).
-        double p = pow(1.0 - jitterUrand(), -1.0 / 2.0);
+        double p = pow(1.0 - randUnit(), -1.0 / 2.0);
         v = (double)lo + (1.0 - 1.0 / p) * range;
         break;
     }
     default:
-        v = (double)lo + jitterUrand() * range;
+        v = (double)lo + randUnit() * range;
         break;
     }
 

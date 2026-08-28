@@ -25,8 +25,14 @@ std::string JsonValue::asString() const {
         char buf[64];
         // Render integral values without a decimal point so that setParam sees
         // "100" rather than "100.000000".
-        if (numVal == (double)(long long)numVal &&
-            numVal < 1e15 && numVal > -1e15) {
+        //
+        // The range test comes first and && short-circuits, which is the whole
+        // point: converting a double outside long long's range is undefined
+        // behaviour, and strtod happily parses "1e19" - or "1e400", which
+        // becomes +Infinity - straight out of a request body. Testing the
+        // range after the cast would mean the UB had already happened.
+        if (numVal < 1e15 && numVal > -1e15 &&
+            numVal == (double)(long long)numVal) {
             snprintf(buf, sizeof(buf), "%lld", (long long)numVal);
         } else {
             snprintf(buf, sizeof(buf), "%.6g", numVal);

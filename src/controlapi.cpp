@@ -31,8 +31,15 @@ static std::string numToStr(long v) {
 
 static std::string dblToStr(double v) {
     char buf[48];
-    if (v == (double)(long long)v) snprintf(buf, sizeof(buf), "%lld", (long long)v);
-    else                           snprintf(buf, sizeof(buf), "%.4g", v);
+    // Range first, then the cast: converting an out-of-range double to
+    // long long is undefined behaviour, and some of what reaches here is
+    // straight from a request body (apiReplayStart echoes back the "speed"
+    // field, which a client is free to send as 1e19 or as Infinity).
+    if (v < 1e15 && v > -1e15 && v == (double)(long long)v) {
+        snprintf(buf, sizeof(buf), "%lld", (long long)v);
+    } else {
+        snprintf(buf, sizeof(buf), "%.4g", v);
+    }
     return buf;
 }
 
@@ -149,6 +156,10 @@ std::string apiStatsJson() {
            ",\"p50\":" + dblToStr(latencyPercentile(50)) +
            ",\"p95\":" + dblToStr(latencyPercentile(95)) +
            ",\"p99\":" + dblToStr(latencyPercentile(99)) + "}";
+    // corrupt counts damage as well as packets: "affected" says how many
+    // packets it touched, this says how hard, which is the number an operator
+    // compares against the configured bit error rate.
+    out += ",\"corrupt\":{\"bitsFlipped\":" + numToStr(corruptGetBitsFlipped()) + "}";
     out += ",\"modules\":{";
     for (int ix = 0; ix < MODULE_CNT; ++ix) {
         Module *m = modules[ix];
@@ -175,10 +186,11 @@ std::string apiStatusJson() {
 
 std::string apiProfilesJson() {
     std::string out = "{\"status\":\"ok\",\"profiles\":[";
-    int cnt = profileCount();
+    char names[MAX_PROFILES][PROFILE_NAME_SIZE];
+    int cnt = profileNamesSnapshot(names, MAX_PROFILES);
     for (int i = 0; i < cnt; ++i) {
         if (i) out += ",";
-        out += quoted(profileGetName(i));
+        out += quoted(names[i]);
     }
     out += "]}";
     return out;
@@ -281,6 +293,8 @@ std::string apiMetricsText() {
            "counter", numToStr(pcapReplaySent()));
     metric("replay_failed_packets_total", "replay packets that could not be injected",
            "counter", numToStr(pcapReplayFailed()));
+    metric("corrupt_flipped_bits_total", "bits the corrupt module flipped",
+           "counter", numToStr(corruptGetBitsFlipped()));
 
     // Per-module series. shortName is a label rather than part of the metric
     // name, which is what lets one Grafana panel cover every module.
@@ -600,10 +614,12 @@ std::string apiReplayStart(const std::string &body, int *httpStatus) {
 }
 
 std::string apiReplayStop(int *httpStatus) {
-    long sent = pcapReplaySent();
     *httpStatus = 200;
+    // Count after the join, not before: the replay thread keeps injecting
+    // until it notices the stop flag, and at a high --replay-speed that is
+    // thousands of packets the caller would otherwise never hear about.
     pcapReplayStop();
-    return okJson("\"injected\":" + numToStr(sent));
+    return okJson("\"injected\":" + numToStr(pcapReplaySent()));
 }
 
 // ---------------------------------------------------------------------------
@@ -700,7 +716,13 @@ std::string controlDispatchJson(const std::string &request) {
         return apiReplayStart(request, &status);
     }
     if (cmd == "apply")   return apiApplyInline(request, &status);
-    if (cmd == "metrics") return apiMetricsText();
+    if (cmd == "metrics") {
+        // Every other reply on this transport is a JSON object with a "status"
+        // field, and pipe.cpp documents that as the contract, so the raw
+        // Prometheus text goes inside the envelope rather than replacing it.
+        // Scrapers should use GET /metrics, which still serves it verbatim.
+        return okJson("\"metrics\":" + quoted(apiMetricsText()));
+    }
     if (cmd == "delete_profile") {
         std::string name = req.str("name");
         if (name.empty()) return errJson("missing name field");

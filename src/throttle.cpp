@@ -72,7 +72,11 @@ static short throttleProcess(PacketNode *head, PacketNode *tail) {
     UNREFERENCED_PARAMETER(head);
     if (!throttleStartTick) {
         if (!isListEmpty() && calcChance(chance)) {
-            LOG("Start new throttling w/ chance %.1f, time frame: %d", chance/10.0, throttleFrame);
+            // chance is in hundredths of a percent, like every other module's:
+            // /100.0 to print it as a percentage. It used to say /10.0, which
+            // reported the 10% default as "100.0".
+            LOG("Start new throttling w/ chance %.1f%%, time frame: %d",
+                chance/100.0, throttleFrame);
             throttleStartTick = timeGetTime();
             throttled = TRUE;
             goto THROTTLE_START; // need this goto since maybe we'll start and stop at this single call

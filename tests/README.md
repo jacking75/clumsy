@@ -86,8 +86,8 @@ sudo iptables -D OUTPUT -p udp --dport 9999 -j NFQUEUE --queue-num 0   # 반드�
 > **주의**: NFQUEUE 규칙을 걸어둔 채 userspace 프로그램이 없으면 해당 트래픽이 전부
 > 드롭됩니다. 규칙은 항상 정리하세요(또는 `--queue-bypass` 사용).
 
-WSL2 Ubuntu 24.04(커널 6.18.35.2)에서 네 모드 모두 검증 완료. 자세한 결과는
-[TODO.md](../TODO.md)의 "4.0 WSL2 개발 환경" 절 참조.
+WSL2 Ubuntu 24.04(커널 6.18.35.2)에서 네 모드 모두 검증 완료. 환경 구축과 제약은
+[docs/LINUX.md](../docs/LINUX.md) 참조.
 
 ## `windows/capture_test.ps1` — Windows 실캡처 회귀 테스트
 

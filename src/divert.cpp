@@ -62,23 +62,37 @@ void packetBackendPrepareClone(const PacketNode *src, PacketNode *dst) {
 // filter "false" - it must never receive anything, only send - which is the
 // documented way to get a WinDivert handle purely for injection.
 //
-// Opened lazily on the replay thread, which is its only caller;
-// pcapReplayStop() joins that thread before calling the close below, so no
-// lock is needed here.
+// Opened lazily on the replay thread, which is its only caller. That thread
+// also closes it on the way out, so no lock is needed here.
 static HANDLE injectHandle = INVALID_HANDLE_VALUE;
+// Set once WinDivertOpen has failed. Without it a replay started without
+// Administrator rights retries the open - and repeats the same message - for
+// every one of a capture file's millions of records.
+static int injectOpenFailed = 0;
 
 int packetBackendInject(char *packet, UINT len, BOOL outbound) {
     WINDIVERT_ADDRESS addr;
     UINT sendLen = 0;
+    int isIPv6;
 
     if (!packet || len < sizeof(WINDIVERT_IPHDR)) return 0;
 
+    // The IP version comes from the packet itself; the caller only knows the
+    // direction it wants. Check the length against the header the packet
+    // actually claims to carry - a truncated record whose first nibble is 6
+    // would otherwise clear the 20-byte IPv4 gate and reach WinDivert with
+    // less than a full IPv6 header, which the Linux backend rejects outright.
+    isIPv6 = (((unsigned char)packet[0] >> 4) == 6) ? 1 : 0;
+    if (isIPv6 && len < sizeof(WINDIVERT_IPV6HDR)) return 0;
+
     if (injectHandle == INVALID_HANDLE_VALUE) {
+        if (injectOpenFailed) return 0;
         injectHandle = WinDivertOpen("false", WINDIVERT_LAYER_NETWORK, 0,
                                      WINDIVERT_FLAG_SEND_ONLY);
         if (injectHandle == INVALID_HANDLE_VALUE) {
             INFO("replay: cannot open a WinDivert injection handle (%lu). "
                  "Administrator rights are required.", GetLastError());
+            injectOpenFailed = 1;
             return 0;
         }
         LOG("replay: opened send-only WinDivert handle");
@@ -88,9 +102,7 @@ int packetBackendInject(char *packet, UINT len, BOOL outbound) {
     addr.Layer    = WINDIVERT_LAYER_NETWORK;
     addr.Event    = WINDIVERT_EVENT_NETWORK_PACKET;
     addr.Outbound = outbound ? 1 : 0;
-    // The IP version comes from the packet itself; the caller only knows the
-    // direction it wants.
-    addr.IPv6     = (((unsigned char)packet[0] >> 4) == 6) ? 1 : 0;
+    addr.IPv6     = isIPv6;
     // Marking the packet as an impostor is what lets a running capture tell
     // replayed traffic apart from live traffic ("not impostor" in a filter).
     addr.Impostor = 1;
@@ -112,6 +124,8 @@ void packetBackendInjectClose(void) {
         injectHandle = INVALID_HANDLE_VALUE;
         LOG("replay: closed injection handle");
     }
+    // Clear the sticky failure too: the next run may well be the elevated one.
+    injectOpenFailed = 0;
 }
 
 // not to put these in common.h since modules shouldn't see these
@@ -476,11 +490,18 @@ static DWORD divertReadLoop(LPVOID arg) {
                     return 0;
                 }
                 // create node and put it into the list
-                InterlockedIncrement(&statsCapturedTotal);
                 fillMetaFromAddr(&metaBuf, &addrBuf);
                 pnode = createNode(packetBuf, readLen, &metaBuf, &addrBuf);
-                appendNode(pnode);
-                divertConsumeStep();
+                if (pnode) {
+                    InterlockedIncrement(&statsCapturedTotal);
+                    appendNode(pnode);
+                    divertConsumeStep();
+                } else {
+                    // Out of memory. On Windows a packet clumsy never sends
+                    // back is a dropped packet, so there is nothing else to
+                    // settle - just do not follow the NULL.
+                    LOG("Out of memory, dropping one captured packet");
+                }
                 /***************** leave critical region ************************/
                 if (!ReleaseMutex(mutex)) {
                     LOG("Fatal: Failed to release mutex (%lu)", GetLastError());
@@ -508,6 +529,8 @@ void statsReset(void) {
     // The delay histogram belongs to the session too; carrying it across a
     // restart would blend two different module configurations into one curve.
     latencyReset();
+    // Same reasoning for the one module that reports more than a packet count.
+    corruptResetStats();
     for (ix = 0; ix < MODULE_CNT; ++ix) {
         InterlockedExchange(&(modules[ix]->affectedCount), 0);
     }

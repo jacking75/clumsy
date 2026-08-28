@@ -39,6 +39,7 @@ typedef int SOCKET;
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <exception>
 #include <string>
 
 #include "common.h"
@@ -49,6 +50,13 @@ typedef int SOCKET;
 #define MAX_CONNECTIONS      32
 #define REQUEST_MAX_BYTES    (256 * 1024)
 #define RECV_TIMEOUT_MS      15000
+// SO_RCVTIMEO only bounds one recv() call, so on its own it does not stop a
+// client that sends a byte every ten seconds from holding a worker thread
+// forever. MAX_CONNECTIONS of those and the dashboard is gone while the
+// capture engine keeps running - and this loop is reached before any token
+// check, so authentication is no defence. A whole request therefore has to
+// arrive inside one absolute window measured from the accept().
+#define REQUEST_DEADLINE_MS  RECV_TIMEOUT_MS
 #define WEB_ROOT_DIR         "web"
 #define REPORT_BUF_SIZE      (512 * 1024)
 
@@ -118,6 +126,7 @@ static const char* statusText(int code) {
     case 403: return "Forbidden";
     case 404: return "Not Found";
     case 405: return "Method Not Allowed";
+    case 408: return "Request Timeout";
     case 413: return "Payload Too Large";
     case 500: return "Internal Server Error";
     default:  return "OK";
@@ -138,7 +147,13 @@ static void sendResponse(SOCKET s, int code, const char *contentType,
         "\r\n",
         code, statusText(code), contentType, bodyLen,
         extraHeaders ? extraHeaders : "");
-    if (n <= 0) return;
+    // A truncated header would leave the client reading a body that is not
+    // there; saying nothing and closing is the honest failure.
+    if (n <= 0 || n >= (int)sizeof(header)) {
+        LOG("http: response header did not fit in %d bytes, dropping the response",
+            (int)sizeof(header));
+        return;
+    }
     if (!sendAll(s, header, n)) return;
     if (bodyLen > 0) sendAll(s, body, bodyLen);
 }
@@ -199,8 +214,15 @@ static std::string queryParam(const std::string &query, const std::string &key) 
     return "";
 }
 
+// True once the whole-request window that started at `startTick` has expired.
+static INLINE_FUNCTION int pastDeadline(DWORD startTick) {
+    return (GetTickCount() - startTick) >= (DWORD)REQUEST_DEADLINE_MS;
+}
+
 // Reads a full request: request line, headers, and Content-Length bytes of body.
-static int readRequest(SOCKET s, HttpRequest *req) {
+// Returns 1 on success, 0 on a malformed request or a closed connection,
+// -1 when the body is too large, -2 when the deadline passed first.
+static int readRequest(SOCKET s, HttpRequest *req, DWORD startTick) {
     std::string buf;
     char chunk[4096];
     size_t headerEnd = std::string::npos;
@@ -214,6 +236,7 @@ static int readRequest(SOCKET s, HttpRequest *req) {
         headerEnd = buf.find("\r\n\r\n");
         if (headerEnd != std::string::npos) break;
         if (buf.size() > 32 * 1024) return 0; // header flood guard
+        if (pastDeadline(startTick)) return -2;
     }
 
     std::string head = buf.substr(0, headerEnd);
@@ -227,6 +250,10 @@ static int readRequest(SOCKET s, HttpRequest *req) {
     if (sp2 == std::string::npos) return 0;
     req->method = requestLine.substr(0, sp1);
     std::string target = requestLine.substr(sp1 + 1, sp2 - sp1 - 1);
+    // "GET  HTTP/1.1" - two spaces, no target - parses cleanly up to here and
+    // leaves target empty. Everything downstream assumes a path that starts
+    // with '/', so reject it as the malformed request line it is.
+    if (target.empty() || target[0] != '/') return 0;
 
     size_t q = target.find('?');
     if (q == std::string::npos) {
@@ -265,6 +292,7 @@ static int readRequest(SOCKET s, HttpRequest *req) {
         int n = recv(s, chunk, sizeof(chunk), 0);
         if (n <= 0) break;
         req->body.append(chunk, n);
+        if (pastDeadline(startTick)) return -2;
     }
     if ((long)req->body.size() > contentLength) req->body.resize(contentLength);
 
@@ -309,7 +337,10 @@ static int isSafeRelativePath(const std::string &p) {
 }
 
 static void serveStatic(SOCKET s, const std::string &path) {
-    std::string rel = (path == "/") ? "index.html" : path.substr(1);
+    // size() <= 1 covers both "/" and the empty path: substr(1) on an empty
+    // string throws std::out_of_range, and an uncaught throw here takes the
+    // whole process - capture session included - down with it.
+    std::string rel = (path.size() <= 1) ? "index.html" : path.substr(1);
     if (!isSafeRelativePath(rel)) {
         sendText(s, 403, "Forbidden");
         return;
@@ -488,6 +519,7 @@ static void routeRequest(SOCKET s, const HttpRequest &req) {
 static DWORD WINAPI connectionThread(LPVOID arg) {
     SOCKET s = (SOCKET)(uintptr_t)arg;
     HttpRequest req;
+    DWORD startTick = GetTickCount();
 
 #if defined(_WIN32)
     DWORD timeout = RECV_TIMEOUT_MS;
@@ -502,12 +534,28 @@ static DWORD WINAPI connectionThread(LPVOID arg) {
     setsockopt(s, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
 #endif
 
-    int rc = readRequest(s, &req);
-    if (rc == 1) {
-        LOG("http: %s %s", req.method.c_str(), req.path.c_str());
-        routeRequest(s, req);
-    } else if (rc == -1) {
-        sendText(s, 413, "Payload Too Large");
+    // One connection must never be able to end the process. The parsing and
+    // routing below runs on std::string, and any std::length_error,
+    // std::out_of_range or std::bad_alloc escaping a worker thread would reach
+    // std::terminate() and abort a capture that has nothing to do with it.
+    try {
+        int rc = readRequest(s, &req, startTick);
+        if (rc == 1) {
+            LOG("http: %s %s", req.method.c_str(), req.path.c_str());
+            routeRequest(s, req);
+        } else if (rc == -1) {
+            sendText(s, 413, "Payload Too Large");
+        } else if (rc == -2) {
+            LOG("http: request did not complete within %d ms, closing",
+                REQUEST_DEADLINE_MS);
+            sendText(s, 408, "Request Timeout");
+        }
+    } catch (const std::exception &e) {
+        LOG("http: dropping a connection after an exception: %s", e.what());
+        sendText(s, 500, "Internal Server Error");
+    } catch (...) {
+        LOG("http: dropping a connection after an unknown exception");
+        sendText(s, 500, "Internal Server Error");
     }
 
     shutdown(s, SD_BOTH);
@@ -679,8 +727,19 @@ void httpServerStop(void) {
     }
 
     // Give in-flight connections (notably SSE streams, which poll serverStop
-    // once per tick) a moment to notice and unwind.
-    for (int i = 0; i < 40 && activeConnections > 0; ++i) Sleep(50);
+    // once per tick) time to notice and unwind. The window has to cover
+    // SO_SNDTIMEO, because a worker blocked in send() only comes back when
+    // that expires - and WSACleanup() below pulls the socket layer out from
+    // under anyone still inside one.
+    {
+        const int steps = (RECV_TIMEOUT_MS + 1000) / 50;
+        int i;
+        for (i = 0; i < steps && activeConnections > 0; ++i) Sleep(50);
+        if (activeConnections > 0) {
+            INFO("web: %ld connection(s) still active at shutdown; continuing.",
+                 (long)activeConnections);
+        }
+    }
 
     WSACleanup();
     LOG("web: server stopped");

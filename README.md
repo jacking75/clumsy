@@ -220,6 +220,11 @@ Key endpoints (see `GET /api/docs` for the full list):
 | `POST /api/pcap/start` / `stop` | control pcap dumping |
 | `POST /api/replay/start` / `stop` | control replaying a saved pcap |
 
+While a replay is running its packets are not captured again: on Windows the
+capture filter automatically gains `and not impostor` (put the word `impostor`
+in your own filter to opt out), and on Linux the fwmark ACCEPT rule that
+`--auto-iptables on` installs for both IPv4 and IPv6 does the same job.
+
 Example:
 
 ```bash
@@ -246,6 +251,7 @@ scrape_configs:
 ```promql
 rate(clumsy_module_affected_packets_total[1m])              # per-module throughput per second
 histogram_quantile(0.95, rate(clumsy_latency_ms_bucket[5m])) # p95 latency
+rate(clumsy_corrupt_flipped_bits_total[1m])                  # actual bit error rate
 clumsy_capturing == 0                                        # find stalled instances
 ```
 
@@ -337,8 +343,7 @@ clumsy/
 │   ├── CODING_STYLE.md # code style principles
 │   └── LINUX.md        # Linux build/run/limitations guide
 ├── Makefile            # Linux build
-├── manual.md           # user manual (Korean)
-└── TODO.md             # development roadmap
+└── manual.md           # user manual (Korean)
 ```
 
 
@@ -347,7 +352,7 @@ clumsy/
 - **User manual**: [manual.md](manual.md) — full feature, web UI, CLI, and API reference (Korean)
 - **Linux guide**: [docs/LINUX.md](docs/LINUX.md) — build, privileges, iptables integration, platform differences
 - **Code style**: [docs/CODING_STYLE.md](docs/CODING_STYLE.md) — conventions since the C++ rewrite
-- **Development roadmap**: [TODO.md](TODO.md) — completed work and future plans
+- **Development roadmap**: [docs/ROADMAP-v2.md](docs/ROADMAP-v2.md) — completed work and future plans
 
 
 ## License

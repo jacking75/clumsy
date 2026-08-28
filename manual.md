@@ -626,6 +626,12 @@ TCP 패킷에 RST 플래그를 설정해서 연결을 강제로 끊습니다.
 - **SSE**: `GET /api/stream` — 같은 페이로드를 200ms마다 push
 - **Named Pipe**: `{"cmd":"get_stats"}` — 기존과 동일한 응답 형식 유지
 
+Corrupt는 "몇 개의 패킷을 건드렸는가"(`modules.corrupt.affected`) 외에 "얼마나
+세게 건드렸는가"도 보고합니다. `GET /api/stats`의 `corrupt.bitsFlipped`,
+`/metrics`의 `clumsy_corrupt_flipped_bits_total`, HTML 리포트의 모듈 표 아래
+한 줄이 같은 누적 비트 수이며, 설정한 `--corrupt-ber`가 실제로 어느 정도로
+적용됐는지 확인할 때 씁니다. 두 값 모두 캡처를 다시 시작하면 초기화됩니다.
+
 자세한 내용은 [제어 API](#7-제어-api-rest--named-pipe) 섹션을 참조하세요.
 
 ### 통계 로그 파일 출력
@@ -1206,9 +1212,17 @@ clumsy는 시작 시 자동으로 Named Pipe 서버(`\\.\pipe\clumsy`)를 열어
 | `{"cmd":"profile","name":"mobile-4g"}` | 프로파일 적용 |
 | `{"cmd":"scenario","action":"load","path":"s.json"}` | 시나리오 로드 (`action`: load/start/stop) |
 | `{"cmd":"pcap","action":"start","path":"out.pcap"}` | pcap 덤프 제어 (`action`: start/stop) |
+| `{"cmd":"replay","action":"start","path":"in.pcap"}` | pcap 재생 제어 (`action`: start/stop) |
+| `{"cmd":"metrics"}` | Prometheus 노출 텍스트 (JSON 문자열 필드로 감싸서 반환) |
 
 > **중요**: `stop`은 0.3과 동일하게 **프로그램 종료**를 의미합니다.
 > 캡처만 멈추려면 `stop_capture`를 사용하세요.
+
+> **응답은 예외 없이 JSON입니다.** `metrics`도 마찬가지라 아래처럼 돌아옵니다:
+> `{"status":"ok","metrics":"# HELP clumsy_up ...\n..."}`
+> Prometheus 스크레이퍼용 원문(raw)이 필요하면 REST의 `GET /metrics`를 쓰세요.
+> 8KB를 넘는 요청도 정상 처리되며, 256KB를 넘으면 조용히 잘리는 대신
+> `{"status":"error","message":"request exceeds the 262144 byte limit"}`가 돌아옵니다.
 
 ### Python 연동 예시
 
@@ -1615,7 +1629,17 @@ REST: `POST /api/replay/start` `{"path":"capture.pcap","speed":1.0,"loop":false}
 | 주입 경로 | 전용 send-only WinDivert 핸들 | fwmark를 단 raw 소켓 |
 | 권한 | 관리자 | `CAP_NET_RAW` |
 | 방향 | outbound (Impostor 플래그로 표시) | **outbound만** |
-| 자기 재캡처 | 필터에 `not impostor`를 넣어 제외 가능 | fwmark ACCEPT 규칙으로 제외 |
+| 자기 재캡처 | 캡처 필터에 `and not impostor`가 자동으로 붙음 | fwmark ACCEPT 규칙으로 제외 |
+| IPv6 헤더 | 기록된 헤더 그대로 전송 | `IPV6_HDRINCL` (커널 4.5 이상) |
+
+**재생 트래픽이 다시 캡처되지 않습니다.** 재생 패킷은 캡처용과 별개인 send-only
+핸들로 나가므로, 예전에는 동시에 돌던 캡처 필터에 그대로 걸려 lag/drop 등이 두 번
+적용되고 통계·pcap·리포트 수치가 부풀려졌습니다. 이제 Windows에서는
+`appStartCapture()`가 사용자 필터를 괄호로 감싼 뒤 `and not impostor`를 자동으로
+덧붙입니다. 다른 WinDivert 도구가 주입한 트래픽을 일부러 잡고 싶다면 필터에
+`impostor`라는 단어를 직접 넣으면 자동 추가가 비활성화됩니다.
+Linux에서는 재생 소켓의 fwmark를 ACCEPT하는 규칙이 같은 역할을 하며,
+`--auto-iptables on`이 IPv4·IPv6 양쪽에 자동으로 설치합니다.
 
 Linux에서 inbound 재생이 불가능한 것은 duplicate 모듈과 같은 이유입니다 —
 raw 소켓은 트래픽을 만들어 보낼 수만 있고, 로컬 수신 경로에 밀어 넣으려면

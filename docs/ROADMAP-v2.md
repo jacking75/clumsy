@@ -6,7 +6,7 @@
 > 맞춰 구현 방법을 상세히 적었습니다. 우선순위·난이도·규모를 표기했으니 원하는 것부터 고르세요.
 >
 > 관련 문서: [CLAUDE.md](../CLAUDE.md) 아키텍처, [docs/CODING_STYLE.md](CODING_STYLE.md) 코드 규칙,
-> [docs/LINUX.md](LINUX.md) 리눅스, [TODO.md](../TODO.md) 완료 이력.
+> [docs/LINUX.md](LINUX.md) 리눅스, [working_log.md](../working_log.md) 작업 이력.
 
 ---
 
@@ -791,7 +791,7 @@ Object.keys(s.modules).forEach(name => {
 - Windows: `MSBuild msvc\clumsy.vcxproj /p:Configuration=Release /p:Platform=x64` 경고 0 확인,
   `tests/windows/capture_test.ps1`(관리자) 회귀
 - 리눅스: `make && make test` 경고 0, `tests/`의 계약 테스트
-- 문서: `manual.md`(사용법), `README.md`(엔드포인트/모듈 수), `TODO.md`(완료 체크), `working_log.md`
+- 문서: `manual.md`(사용법), `README.md`(엔드포인트/모듈 수), 이 문서의 완료 체크, `working_log.md`
 
 문서화까지가 "완료"입니다.
 

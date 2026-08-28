@@ -213,8 +213,14 @@ duplicate 모듈의 복제본과 pcap 재생(`--replay-in`)이 여기에 해당�
 **먼저** ACCEPT 시켜야 합니다:
 
 ```bash
-sudo iptables -I OUTPUT -m mark --mark 0xC1 -j ACCEPT
+sudo iptables  -I OUTPUT -m mark --mark 0xC1 -j ACCEPT
+sudo ip6tables -I OUTPUT -m mark --mark 0xC1 -j ACCEPT   # IPv6 트래픽을 다룬다면 필수
 ```
+
+**IPv4·IPv6 각각에 넣어야 합니다.** 주입 소켓은 IPv6 쪽에도 같은 마크를 찍는데,
+`ip6tables`에 ACCEPT 규칙이 없으면 IPv6 복제본만 큐로 되돌아와 위의 무한 증폭이
+IPv6 트래픽에 대해서만 재현됩니다. `--auto-iptables on`은 NFQUEUE 규칙을 설치한
+테이블마다 이 우회 규칙을 함께 넣습니다.
 
 마크 값이 기존 방화벽 정책과 충돌하면 `--inject-mark <n>`으로 바꾸세요.
 
@@ -247,6 +253,15 @@ ifb 리다이렉트 같은 전혀 다른 장치가 필요합니다. Windows의 W
 | outbound IPv4 / IPv6 재생 | 정상 동작 |
 | inbound 재생 | **불가** — 시작 시 거부 |
 | 필요 권한 | `CAP_NET_RAW` (`CAP_NET_ADMIN`과 함께 부여됨) |
+| IPv6 헤더 보존 | `IPV6_HDRINCL` — 커널 4.5 이상 필요 |
+
+IPv6 레코드는 기록된 헤더를 그대로 내보냅니다(`IPV6_HDRINCL`). 커널이 이 옵션을
+거부하면 시작 시 경고가 나오고, 그 경우에는 커널이 출발지 주소를 자기 것으로 바꿔
+쓰기 때문에 TCP/UDP 체크섬(IPv6 pseudo-header 기반, RFC 8200)이 어긋나 수신측이
+조용히 버립니다 — `sendto()`는 성공했으므로 통계에는 "전송됨"으로 잡힙니다.
+
+`CAP_NET_RAW` 없이 재생을 시작하면 소켓 열기 실패를 한 번만 로그하고 즉시 중단합니다
+(레코드마다 재시도하며 로그를 도배하지 않습니다).
 
 이유는 duplicate와 동일합니다. 실측으로는 캡처한 25패킷을 그대로 재생해
 25패킷이 수신 측에 도달하는 것을 확인했습니다(`tests/linux/behaviour_test.sh`).

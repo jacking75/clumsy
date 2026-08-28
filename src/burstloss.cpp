@@ -61,8 +61,8 @@ static short burstlossProcess(PacketNode *head, PacketNode *tail) {
 
         if (checkDirection(pac->meta.outbound, burstlossInbound, burstlossOutbound)) {
             // 1. Drop decision based on current state
-            short doDropped = (currentState == STATE_GOOD) ? calcChance(good)
-                                                            : calcChance(bad);
+            short wasGood   = (currentState == STATE_GOOD);
+            short doDropped = wasGood ? calcChance(good) : calcChance(bad);
             // 2. State transition
             if (currentState == STATE_GOOD) {
                 if (calcChance(gb)) {
@@ -78,7 +78,10 @@ static short burstlossProcess(PacketNode *head, PacketNode *tail) {
 
             // 3. Apply drop
             if (doDropped) {
-                LOG("burstloss: dropped in %s state", currentState == STATE_GOOD ? "GOOD" : "BAD");
+                // wasGood, not currentState: the transition above may already
+                // have flipped the state, and reporting the new one would blame
+                // a BAD burst for a packet the 2% GOOD-state chance dropped.
+                LOG("burstloss: dropped in %s state", wasGood ? "GOOD" : "BAD");
                 freeNode(popNode(pac));
                 ++dropped;
                 InterlockedIncrement(&burstlossModule.affectedCount);

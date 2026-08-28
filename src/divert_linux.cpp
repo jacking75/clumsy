@@ -54,6 +54,14 @@ int  iptablesAutoInstall(const FilterProgram *prog, int queueNum, UINT32 injectM
 void iptablesAutoRemove(void);
 int  iptablesAutoIsEnabled(void);
 
+// Lets a raw IPv6 socket send the packet's own header instead of having the
+// kernel synthesise one. Added in Linux 4.5; define it so the build does not
+// depend on how new the distribution's headers are (the runtime setsockopt
+// still tells us whether the kernel honours it).
+#ifndef IPV6_HDRINCL
+#define IPV6_HDRINCL 36
+#endif
+
 #define MAX_PACKETSIZE 0xFFFF
 // same clock cadence as the Windows backend so module timing matches
 #define CLOCK_WAITMS 40
@@ -91,7 +99,8 @@ static struct nfq_handle   *nfqHandle  = NULL;
 static struct nfq_q_handle *nfqQueue   = NULL;
 static int                  nfqFd      = -1;
 static int                  rawSocket   = -1;  // AF_INET,  IP_HDRINCL
-static int                  rawSocket6  = -1;  // AF_INET6, kernel writes the header
+static int                  rawSocket6  = -1;  // AF_INET6, IPV6_HDRINCL when the kernel allows it
+static int                  rawHdrIncl6 = 0;
 static long                 rawDropCount = 0;   // clones dropped, raw socket full
 static UINT32               injectMark = 0;     // fwmark stamped on injected packets
 // Runaway guard: injections per second, and the window they are counted in.
@@ -149,10 +158,17 @@ void packetBackendPrepareClone(const PacketNode *src, PacketNode *dst) {
 // pcap replay needs to send packets when no capture is running, so it cannot
 // borrow the capture sockets: those only exist between divertStart() and
 // divertStop(). It gets its own pair with the same fwmark, opened lazily on
-// the replay thread. pcapReplayStop() joins that thread before calling the
-// close below, so this needs no lock.
+// the replay thread. The replay thread is the only user and it closes them
+// itself on the way out, so this needs no lock.
 static int replaySocket  = -1;
 static int replaySocket6 = -1;
+// Set once the sockets could not be opened. Without it a replay run without
+// CAP_NET_RAW retries socket() - and repeats the same log line - for every one
+// of a capture file's millions of records.
+static int replayOpenFailed = 0;
+// Whether the kernel accepted IPV6_HDRINCL. When it did, IPv6 records go out
+// exactly as captured; when it did not, see the comment in the send path.
+static int replayHdrIncl6 = 0;
 
 static int ensureReplaySockets(void) {
     const int one = 1;
@@ -160,6 +176,7 @@ static int ensureReplaySockets(void) {
     UINT32 mark;
 
     if (replaySocket >= 0 || replaySocket6 >= 0) return 1;
+    if (replayOpenFailed) return 0;
 
     mark = (UINT32)argGetInt("inject-mark", DEFAULT_INJECT_MARK);
 
@@ -176,11 +193,26 @@ static int ensureReplaySockets(void) {
     if (replaySocket6 >= 0) {
         setsockopt(replaySocket6, SOL_SOCKET, SO_SNDBUF, &sndbuf, sizeof(sndbuf));
         setsockopt(replaySocket6, SOL_SOCKET, SO_MARK, &mark, sizeof(mark));
+        // IPv6 has no IPPROTO_RAW shortcut equivalent to IP_HDRINCL, so ask
+        // for it explicitly. Letting the kernel rebuild the header instead
+        // would replace the captured source address with a local one, and the
+        // TCP/UDP checksum - computed over the IPv6 pseudo-header, RFC 8200 -
+        // would no longer match, so every replayed packet would be discarded
+        // by the receiver while sendto() still reported success.
+        replayHdrIncl6 =
+            (setsockopt(replaySocket6, IPPROTO_IPV6, IPV6_HDRINCL, &one, sizeof(one)) == 0);
+        if (!replayHdrIncl6) {
+            INFO("replay: this kernel refuses IPV6_HDRINCL (%s); IPv6 records "
+                 "will be sent with a kernel-built header, so their checksums "
+                 "will not match and receivers will drop them.",
+                 strerror(errno));
+        }
     }
 
     if (replaySocket < 0 && replaySocket6 < 0) {
         INFO("replay: cannot open a raw socket (%s). CAP_NET_RAW is required.",
              strerror(errno));
+        replayOpenFailed = 1;
         return 0;
     }
     return 1;
@@ -208,11 +240,19 @@ int packetBackendInject(char *packet, UINT len, BOOL outbound) {
         memset(&dst6, 0, sizeof(dst6));
         dst6.sin6_family = AF_INET6;
         dst6.sin6_addr   = ip6->ip6_dst;
-        // No IP_HDRINCL for IPv6: hand the kernel the payload and let it
-        // rebuild the header from the destination.
-        sent = sendto(replaySocket6, packet + sizeof(struct ip6_hdr),
-                      len - sizeof(struct ip6_hdr), MSG_DONTWAIT,
-                      (struct sockaddr*)&dst6, sizeof(dst6));
+        if (replayHdrIncl6) {
+            // Send the record exactly as captured, header and all, so the
+            // source address the checksum was computed over survives.
+            sent = sendto(replaySocket6, packet, len, MSG_DONTWAIT,
+                          (struct sockaddr*)&dst6, sizeof(dst6));
+        } else {
+            // Pre-4.5 fallback: the kernel writes its own header. Already
+            // warned about at socket-open time; the receiver will very likely
+            // drop these on a checksum mismatch.
+            sent = sendto(replaySocket6, packet + sizeof(struct ip6_hdr),
+                          len - sizeof(struct ip6_hdr), MSG_DONTWAIT,
+                          (struct sockaddr*)&dst6, sizeof(dst6));
+        }
     } else {
         const struct iphdr *ip = (const struct iphdr*)packet;
         struct sockaddr_in dst;
@@ -235,6 +275,10 @@ int packetBackendInject(char *packet, UINT len, BOOL outbound) {
 void packetBackendInjectClose(void) {
     if (replaySocket  >= 0) { close(replaySocket);  replaySocket  = -1; }
     if (replaySocket6 >= 0) { close(replaySocket6); replaySocket6 = -1; }
+    // Clear the sticky failure too: the next run may well be the one started
+    // with the capability it was missing.
+    replayOpenFailed = 0;
+    replayHdrIncl6   = 0;
 }
 
 // ---------------------------------------------------------------------------
@@ -292,9 +336,6 @@ static int injectRawPacket(PacketNode *node) {
     }
 
     if (ip->version == 6) {
-        // IPv6 raw sockets do not support IP_HDRINCL, so the kernel builds the
-        // header: hand it the payload after the 40-byte fixed header and let it
-        // recreate the rest from the destination address.
         const struct ip6_hdr *ip6 = (const struct ip6_hdr*)node->packet;
         struct sockaddr_in6 dst6;
 
@@ -306,11 +347,21 @@ static int injectRawPacket(PacketNode *node) {
         dst6.sin6_family = AF_INET6;
         dst6.sin6_addr   = ip6->ip6_dst;
 
-        sent = sendto(rawSocket6,
-                      node->packet + sizeof(struct ip6_hdr),
-                      node->packetLen - sizeof(struct ip6_hdr),
-                      MSG_DONTWAIT,
-                      (struct sockaddr*)&dst6, sizeof(dst6));
+        if (rawHdrIncl6) {
+            // A clone has to be the same packet, so send the captured header
+            // verbatim rather than letting the kernel write a new one.
+            sent = sendto(rawSocket6, node->packet, node->packetLen,
+                          MSG_DONTWAIT, (struct sockaddr*)&dst6, sizeof(dst6));
+        } else {
+            // Pre-4.5 kernels have no IPV6_HDRINCL: hand over the payload
+            // after the 40-byte fixed header and let the kernel recreate the
+            // rest from the destination address.
+            sent = sendto(rawSocket6,
+                          node->packet + sizeof(struct ip6_hdr),
+                          node->packetLen - sizeof(struct ip6_hdr),
+                          MSG_DONTWAIT,
+                          (struct sockaddr*)&dst6, sizeof(dst6));
+        }
     } else {
         memset(&dst, 0, sizeof(dst));
         dst.sin_family      = AF_INET;
@@ -457,8 +508,17 @@ static int nfqCallback(struct nfq_q_handle *qh, struct nfgenmsg *nfmsg,
     memset(&backendMeta, 0, sizeof(backendMeta));
     backendMeta.packetId = id;
 
-    InterlockedIncrement(&statsCapturedTotal);
     pnode = createNode((char*)payload, (UINT)len, &meta, &backendMeta);
+    if (!pnode) {
+        // Out of memory. Every queued id still has to be answered or the
+        // kernel queue stalls, so let this one through untouched rather than
+        // dropping the user's traffic because clumsy could not allocate.
+        LOG("Out of memory, passing one captured packet through untouched");
+        nfq_set_verdict(qh, id, NF_ACCEPT, 0, NULL);
+        return 0;
+    }
+
+    InterlockedIncrement(&statsCapturedTotal);
     appendNode(pnode);
     divertConsumeStep();
     return 0;
@@ -658,6 +718,12 @@ int divertStart(const char *filter, char buf[]) {
         if (rawSocket6 >= 0) {
             setsockopt(rawSocket6, SOL_SOCKET, SO_SNDBUF, &sndbuf, sizeof(sndbuf));
             setsockopt(rawSocket6, SOL_SOCKET, SO_MARK, &injectMark, sizeof(injectMark));
+            rawHdrIncl6 = (setsockopt(rawSocket6, IPPROTO_IPV6, IPV6_HDRINCL,
+                                      &one, sizeof(one)) == 0);
+            if (!rawHdrIncl6) {
+                LOG("no IPV6_HDRINCL (%s); IPv6 clones will carry a "
+                    "kernel-built header", strerror(errno));
+            }
         } else {
             LOG("no IPv6 injection socket (%s); IPv6 clones will be dropped",
                 strerror(errno));
@@ -703,8 +769,9 @@ int divertStart(const char *filter, char buf[]) {
         INFO("NFQUEUE bound to queue %d. Feed it with rules like these, in order:", queueNum);
         INFO("  sudo iptables -I OUTPUT -m mark --mark 0x%x -j ACCEPT", injectMark);
         INFO("  sudo iptables -A OUTPUT -p udp --dport 9999 -j NFQUEUE --queue-num %d --queue-bypass", queueNum);
-        INFO("  The first rule is required whenever the duplicate module is used: it");
-        INFO("  stops clumsy's own injected packets from re-entering the queue.");
+        INFO("  The first rule is required whenever the duplicate module or pcap");
+        INFO("  replay is used: it stops clumsy's own injected packets from");
+        INFO("  re-entering the queue and being shaped and counted a second time.");
         INFO("  Remove both with -D when you are done.");
         INFO("  (or pass --auto-iptables and let clumsy manage them for you)");
     }
@@ -730,11 +797,14 @@ void divertStop() {
     // stopLooping within ~50ms, so anything longer means a backend call is
     // wedged. Say so instead of hanging the process with no explanation.
     if (WaitForMultipleObjects(2, threads, TRUE, 5000) != WAIT_OBJECT_0) {
-        INFO("warning: capture threads did not stop within 5s; leaking them and "
-             "continuing shutdown.");
-        // Deliberately not CloseHandle: a still-running thread would write into
-        // freed handle memory. The iptables rules still come out - leaving them
-        // installed is far worse than leaking two threads on the way out.
+        INFO("warning: capture threads did not stop within 5s; abandoning them "
+             "and continuing shutdown.");
+        // Closing a handle whose thread is still running is fine: the platform
+        // layer reference-counts it and frees the storage only once both the
+        // thread and this caller are done with it. The iptables rules still
+        // come out - leaving them installed is far worse than two threads that
+        // outlive the capture on the way out.
+        CloseHandle(loopThread); CloseHandle(clockThread);
         loopThread = clockThread = NULL;
         iptablesAutoRemove();
         if (rawSocket  >= 0) { close(rawSocket);  rawSocket  = -1; }
@@ -767,6 +837,8 @@ void statsReset(void) {
     // The delay histogram belongs to the session too; carrying it across a
     // restart would blend two different module configurations into one curve.
     latencyReset();
+    // Same reasoning for the one module that reports more than a packet count.
+    corruptResetStats();
     for (ix = 0; ix < MODULE_CNT; ++ix) {
         InterlockedExchange(&(modules[ix]->affectedCount), 0);
     }
