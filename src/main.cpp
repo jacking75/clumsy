@@ -581,6 +581,8 @@ static void printUsage(void) {
 "  --queue-num <n>          NFQUEUE queue number to bind (default 0)\n"
 "  --inject-mark <n>        fwmark stamped on injected packets (default 0xC1);\n"
 "                           ACCEPT it before your NFQUEUE rule\n"
+"  --auto-iptables on       let clumsy install and remove the NFQUEUE rules\n"
+"                           itself, derived from the filter expression\n"
 "  --elevate on             print how to obtain CAP_NET_ADMIN\n"
 #endif
 "\n"
@@ -721,6 +723,8 @@ int main(int argc, char* argv[]) {
 #if defined(_WIN32)
     INFO("  Named Pipe    : \\\\.\\pipe\\clumsy");
 #else
+    INFO("  Control socket: %s",
+         pipeServerPath()[0] ? pipeServerPath() : "unavailable");
     INFO("  NFQUEUE num   : %d  (--queue-num to change)", argGetInt("queue-num", 0));
 #endif
     INFO("  Presets       : %d loaded", appPresetCount());

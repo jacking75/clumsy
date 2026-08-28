@@ -246,9 +246,15 @@ void statsLogTick(void);
 int buildProcessFilter(const char *processName, char *filterBuf, int bufSize,
                        char *errBuf, int errSize);
 
-// Named Pipe control API  (pipe.cpp)
+// Control API transport  (pipe.cpp)
+// Windows: Named Pipe \\.\pipe\clumsy. POSIX: Unix domain socket.
+// Both speak the identical JSON protocol via controlDispatchJson().
 void pipeServerStart(void);
 void pipeServerStop(void);
+#if !defined(_WIN32)
+// Socket path actually bound, or "" when the server did not start.
+const char* pipeServerPath(void);
+#endif
 extern volatile short pipeStopRequested; // set by "stop" command; checked in main loop
 
 // Shared module-KV helper  (utils.cpp)

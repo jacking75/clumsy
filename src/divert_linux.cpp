@@ -33,6 +33,7 @@
 #include <arpa/inet.h>
 #include <netinet/in.h>
 #include <netinet/ip.h>
+#include <netinet/ip6.h>
 
 #include <linux/netfilter.h>
 #include <libnetfilter_queue/libnetfilter_queue.h>
@@ -47,6 +48,11 @@
 
 #include "common.h"
 #include "filterexpr.h"
+
+// iptables_linux.cpp
+int  iptablesAutoInstall(const FilterProgram *prog, int queueNum, UINT32 injectMark);
+void iptablesAutoRemove(void);
+int  iptablesAutoIsEnabled(void);
 
 #define MAX_PACKETSIZE 0xFFFF
 // same clock cadence as the Windows backend so module timing matches
@@ -84,7 +90,8 @@ volatile LONG statsSentTotal = 0;
 static struct nfq_handle   *nfqHandle  = NULL;
 static struct nfq_q_handle *nfqQueue   = NULL;
 static int                  nfqFd      = -1;
-static int                  rawSocket  = -1;
+static int                  rawSocket   = -1;  // AF_INET,  IP_HDRINCL
+static int                  rawSocket6  = -1;  // AF_INET6, kernel writes the header
 static long                 rawDropCount = 0;   // clones dropped, raw socket full
 static UINT32               injectMark = 0;     // fwmark stamped on injected packets
 // Runaway guard: injections per second, and the window they are counted in.
@@ -154,18 +161,14 @@ static int injectRawPacket(PacketNode *node) {
     const struct iphdr *ip;
     ssize_t sent;
 
-    if (rawSocket < 0 || node->packetLen < sizeof(struct iphdr)) return 0;
+    if (node->packetLen < sizeof(struct iphdr)) return 0;
+    if (rawSocket < 0 && rawSocket6 < 0) return 0;
 
     ip = (const struct iphdr*)node->packet;
-    if (ip->version != 4) {
-        // IPv6 raw injection needs a separate socket and a different sockaddr;
-        // clones of IPv6 traffic are dropped rather than silently mis-sent.
-        LOG("raw inject: IPv6 clone not supported, dropping");
-        return 0;
-    }
     if (!node->meta.outbound) {
-        // A raw socket can only originate traffic. Re-injecting a clone into
-        // the local receive path would need a different mechanism entirely.
+        // A raw socket can only originate traffic. Injecting a clone into the
+        // local receive path would need a TUN device or an ifb redirect - out of
+        // scope, and the original packet is still delivered normally.
         LOG("raw inject: inbound clone not supported, dropping");
         return 0;
     }
@@ -195,12 +198,34 @@ static int injectRawPacket(PacketNode *node) {
         }
     }
 
-    memset(&dst, 0, sizeof(dst));
-    dst.sin_family      = AF_INET;
-    dst.sin_addr.s_addr = ip->daddr;
+    if (ip->version == 6) {
+        // IPv6 raw sockets do not support IP_HDRINCL, so the kernel builds the
+        // header: hand it the payload after the 40-byte fixed header and let it
+        // recreate the rest from the destination address.
+        const struct ip6_hdr *ip6 = (const struct ip6_hdr*)node->packet;
+        struct sockaddr_in6 dst6;
 
-    sent = sendto(rawSocket, node->packet, node->packetLen, MSG_DONTWAIT,
-                  (struct sockaddr*)&dst, sizeof(dst));
+        if (rawSocket6 < 0 || node->packetLen <= sizeof(struct ip6_hdr)) {
+            LOG("raw inject: no IPv6 socket, dropping clone");
+            return 0;
+        }
+        memset(&dst6, 0, sizeof(dst6));
+        dst6.sin6_family = AF_INET6;
+        dst6.sin6_addr   = ip6->ip6_dst;
+
+        sent = sendto(rawSocket6,
+                      node->packet + sizeof(struct ip6_hdr),
+                      node->packetLen - sizeof(struct ip6_hdr),
+                      MSG_DONTWAIT,
+                      (struct sockaddr*)&dst6, sizeof(dst6));
+    } else {
+        memset(&dst, 0, sizeof(dst));
+        dst.sin_family      = AF_INET;
+        dst.sin_addr.s_addr = ip->daddr;
+
+        sent = sendto(rawSocket, node->packet, node->packetLen, MSG_DONTWAIT,
+                      (struct sockaddr*)&dst, sizeof(dst));
+    }
     if (sent < 0) {
         if (errno == EAGAIN || errno == EWOULDBLOCK || errno == ENOBUFS) {
             // Kernel buffer is full - the clone is expendable, keep moving.
@@ -533,6 +558,17 @@ int divertStart(const char *filter, char buf[]) {
         injectWindowCount = 0;
         injectWindowStart = 0;
         injectDisabled = 0;
+
+        // Companion socket for IPv6 clones. Optional: without it only IPv6
+        // clones are lost, everything else keeps working.
+        rawSocket6 = socket(AF_INET6, SOCK_RAW | SOCK_NONBLOCK, IPPROTO_RAW);
+        if (rawSocket6 >= 0) {
+            setsockopt(rawSocket6, SOL_SOCKET, SO_SNDBUF, &sndbuf, sizeof(sndbuf));
+            setsockopt(rawSocket6, SOL_SOCKET, SO_MARK, &injectMark, sizeof(injectMark));
+        } else {
+            LOG("no IPv6 injection socket (%s); IPv6 clones will be dropped",
+                strerror(errno));
+        }
     } else {
         INFO("warning: raw socket unavailable (%s); the duplicate module cannot "
              "inject clones.", strerror(errno));
@@ -558,19 +594,34 @@ int divertStart(const char *filter, char buf[]) {
         goto fail;
     }
 
-    INFO("NFQUEUE bound to queue %d. Feed it with rules like these, in order:", queueNum);
-    INFO("  sudo iptables -I OUTPUT -m mark --mark 0x%x -j ACCEPT", injectMark);
-    INFO("  sudo iptables -A OUTPUT -p udp --dport 9999 -j NFQUEUE --queue-num %d", queueNum);
-    INFO("  The first rule is required whenever the duplicate module is used: it");
-    INFO("  stops clumsy's own injected packets from re-entering the queue.");
-    INFO("  Remove both with -D when you are done - traffic matching the NFQUEUE");
-    INFO("  rule is dropped while the rule exists and clumsy is not running.");
+    if (parseBoolValue(argGet("auto-iptables"))) {
+        if (!iptablesAutoInstall(filterProg, queueNum, injectMark)) {
+            snprintf(buf, MSG_BUFSIZE,
+                     "Failed to install iptables rules. Run as root, or drop "
+                     "--auto-iptables and add the rules manually.");
+            // Unwind everything divertStart set up so far.
+            InterlockedIncrement16(&stopLooping);
+            WaitForMultipleObjects(2, (HANDLE[]){loopThread, clockThread}, TRUE, 3000);
+            CloseHandle(loopThread); CloseHandle(clockThread);
+            loopThread = clockThread = NULL;
+            goto fail;
+        }
+    } else {
+        INFO("NFQUEUE bound to queue %d. Feed it with rules like these, in order:", queueNum);
+        INFO("  sudo iptables -I OUTPUT -m mark --mark 0x%x -j ACCEPT", injectMark);
+        INFO("  sudo iptables -A OUTPUT -p udp --dport 9999 -j NFQUEUE --queue-num %d --queue-bypass", queueNum);
+        INFO("  The first rule is required whenever the duplicate module is used: it");
+        INFO("  stops clumsy's own injected packets from re-entering the queue.");
+        INFO("  Remove both with -D when you are done.");
+        INFO("  (or pass --auto-iptables and let clumsy manage them for you)");
+    }
     return TRUE;
 
 fail:
     if (nfqQueue)  { nfq_destroy_queue(nfqQueue); nfqQueue = NULL; }
     if (nfqHandle) { nfq_close(nfqHandle); nfqHandle = NULL; }
-    if (rawSocket >= 0) { close(rawSocket); rawSocket = -1; }
+    if (rawSocket  >= 0) { close(rawSocket);  rawSocket  = -1; }
+    if (rawSocket6 >= 0) { close(rawSocket6); rawSocket6 = -1; }
     if (filterProg) { filterFree(filterProg); filterProg = NULL; }
     return FALSE;
 }
@@ -589,18 +640,26 @@ void divertStop() {
         INFO("warning: capture threads did not stop within 5s; leaking them and "
              "continuing shutdown.");
         // Deliberately not CloseHandle: a still-running thread would write into
-        // freed handle memory.
+        // freed handle memory. The iptables rules still come out - leaving them
+        // installed is far worse than leaking two threads on the way out.
         loopThread = clockThread = NULL;
-        if (rawSocket >= 0) { close(rawSocket); rawSocket = -1; }
+        iptablesAutoRemove();
+        if (rawSocket  >= 0) { close(rawSocket);  rawSocket  = -1; }
+        if (rawSocket6 >= 0) { close(rawSocket6); rawSocket6 = -1; }
         return;
     }
     CloseHandle(loopThread);
     CloseHandle(clockThread);
     loopThread = clockThread = NULL;
 
+    // Rules come out before the queue does: the reverse order would leave a
+    // brief window where the rule points at a queue nobody is reading.
+    iptablesAutoRemove();
+
     if (nfqQueue)  { nfq_destroy_queue(nfqQueue); nfqQueue = NULL; }
     if (nfqHandle) { nfq_close(nfqHandle); nfqHandle = NULL; }
-    if (rawSocket >= 0) { close(rawSocket); rawSocket = -1; }
+    if (rawSocket  >= 0) { close(rawSocket);  rawSocket  = -1; }
+    if (rawSocket6 >= 0) { close(rawSocket6); rawSocket6 = -1; }
     if (mutex) { CloseHandle(mutex); mutex = NULL; }
     if (filterProg) { filterFree(filterProg); filterProg = NULL; }
     nfqFd = -1;

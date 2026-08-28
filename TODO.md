@@ -59,6 +59,7 @@ Phase 4(리눅스)를 마지막에 두는 이유: 사용자 지정 사항이며,
 - [x] 4.5 빌드 시스템 (genie.lua 리눅스 네이티브 타겟, gcc16)
 - [x] 4.6 배포 문서화
 - [x] 4.7 완료 확인
+- [x] 4.8 선택 과제 (auto-iptables, 제어 소켓, IPv6 복제, 패키징)
 
 ---
 
@@ -492,11 +493,85 @@ WSL2는 자체 네트워크 네임스페이스를 사용하므로, WSL2에서 �
 - [x] 웹 UI가 리눅스에서도 동일하게 접속/제어 가능 — REST/SSE/정적서빙/리포트/pcap 17항목 통과
 - [x] `README.md` / `docs/LINUX.md`에 리눅스 설치/실행 가이드 추가
 
-**남은 선택 과제 (Phase 4 범위 밖으로 명시적 분리)**
-- `--auto-iptables`: 필터 표현식 → iptables 규칙 자동 번역 (4.3의 2차 구현)
-- `.deb` / `.rpm` 패키징
-- 리눅스용 Named Pipe 대체 IPC (현재는 HTTP API로 충분하다고 판단)
-- IPv6 복제 / inbound 복제 지원 (raw 소켓 한계)
+### 4.8 선택 과제 — 완료 (2026-08-28)
+
+Phase 4 완료 시점에 별도 과제로 분리했던 항목들을 이어서 구현했습니다.
+
+#### `--auto-iptables` (4.3의 2차 구현) — 완료
+
+`filterexpr.cpp`에 `filterDeriveIptables()`를 추가해 AST에서 iptables match 인자를
+도출하고, 신규 `iptables_linux.cpp`가 설치·제거를 담당합니다.
+
+```
+$ sudo clumsy --auto-iptables on --filter "udp and outbound and udp.DstPort == 9999"
+auto-iptables: installed 2 rule(s) for queue 0.
+
+-A OUTPUT -m mark --mark 0xc1 -j ACCEPT
+-A OUTPUT -p udp -m udp --dport 9999 -j NFQUEUE --queue-num 0 --queue-bypass
+```
+
+**설계 원칙 — 규칙을 절대 남기지 않는다.** 남은 NFQUEUE 규칙은 그 트래픽을 통째로
+블랙홀로 만들기 때문에 이 기능의 유일한 실질 위험입니다:
+
+- 도출 규칙은 필터의 **상위집합**. 넓게 잡는 건 무해(clumsy가 재필터링)하지만
+  좁게 잡으면 대상 트래픽을 조용히 놓칩니다. 번역 불가 항목은 넓히고 콘솔에 알립니다.
+- `-I`에 쓴 문자열을 **그대로** `-D`에 넘겨 설치/제거가 어긋날 수 없게 했습니다.
+- 이 프로세스가 실제 설치한 규칙만 역순 제거. 정상 종료·Ctrl+C·백엔드 정지 경로 모두에서 실행.
+- **모든 규칙에 `--queue-bypass`.** SIGKILL이나 전원 차단으로 정리를 못 해도
+  clumsy가 없으면 트래픽은 정상 통과합니다. 손으로 넣은 규칙보다 안전합니다.
+- 설치 중 실패 시 그때까지 넣은 규칙 롤백.
+
+검증: 규칙 자동 설치 → 실제로 drop 100% 동작(10 전송 → 0 수신) → SIGINT 후 잔여 규칙 0개.
+
+#### 리눅스 제어 소켓 (Named Pipe 대체) — 완료
+
+당초 "HTTP API로 충분"이라 판단했으나, 기존 Named Pipe 자동화 자산의 이식 비용을 고려해
+구현했습니다. `pipe.cpp`의 POSIX 분기에 Unix 도메인 소켓 서버를 넣었고
+**프로토콜은 완전히 동일**합니다 — 양쪽 다 `controlDispatchJson()`을 호출하므로
+JSON이 바이트 단위로 같습니다. 기존 스크립트는 연결부만 바꾸면 됩니다.
+
+- `/run/clumsy.sock`, 권한 부족 시 `/tmp/clumsy.sock` 폴백 (배너에 실제 경로 출력)
+- 퍼미션 0666 — 권한 없는 자동화도 제어 가능 (Named Pipe 기본 접근성과 동일)
+- 종료 시 소켓 파일 삭제
+
+검증: legacy `set`/`get_stats` 응답이 Windows와 동일, 신규 명령 동작, 오류 처리,
+종료 시 소켓 제거까지 7항목 통과.
+
+#### IPv6 복제 주입 — 완료 (inbound는 구조적 불가)
+
+`AF_INET6` raw 소켓을 추가해 **IPv6 outbound 복제**를 지원합니다. IPv6 raw 소켓은
+`IP_HDRINCL`을 지원하지 않으므로 40바이트 고정 헤더 이후를 넘기고 커널이 헤더를 만들게 합니다.
+
+**inbound 복제는 구현하지 않았습니다** — raw 소켓은 트래픽을 *내보내는* 것만 가능하고,
+도착한 패킷의 복사본을 로컬 수신 경로에 밀어 넣으려면 TUN이나 ifb 리다이렉트 같은
+전혀 다른 장치가 필요합니다. WinDivert는 커널 드라이버라 양방향 주입이 되지만
+NFQUEUE 모델에서는 얻을 수 없는 능력입니다. 사유와 함께 문서화했습니다.
+
+#### `.deb` / `.rpm` 패키징 — .deb 완료, .rpm 미검증
+
+- `make package-deb` → `bin/linux/clumsy_0.4_amd64.deb` (약 138KB)
+- postinst가 `setcap cap_net_admin,cap_net_raw+ep`를 적용해 **sudo 없이 실행 가능**
+  (setuid root 대신 필요한 두 권한만 부여)
+- 데이터는 `/usr/share/clumsy/`에 두고 `/usr/bin/`에서 심볼릭 링크
+  (clumsy가 실행 파일 옆에서 `config.json`/`web/`을 찾기 때문)
+- 스테이징은 `/tmp`에서 수행 — WSL의 `/mnt/c` 체크아웃은 모든 파일이 0777로 보여
+  `dpkg-deb`가 control 디렉토리 권한을 거부합니다
+- `make install PREFIX=...`도 추가
+
+검증: 빌드 → 설치 → capability 부여 확인 → **sudo 없이 실행** → 심볼릭 링크로
+config/대시보드 로드 확인 → 제거 후 잔여 파일 0개까지 11항목 통과.
+
+**`.rpm`은 spec 파일(`packaging/clumsy.spec`)만 작성했고 빌드 검증은 못 했습니다** —
+개발 환경에 rpm 툴체인이 없습니다. deb와 동일한 레이아웃을 따르지만
+Fedora/RHEL에서의 첫 빌드를 검증으로 삼아야 합니다.
+
+---
+
+**여전히 남은 항목**
+- `.rpm` 실제 빌드 검증 (rpm 툴체인 있는 환경 필요)
+- MinGW(clang) 빌드 검증 (개발 환경 미설치)
+- Windows 실패킷 캡처 경로 회귀 (관리자 권한 콘솔 필요)
+- `external/iup-*` 4개 디렉토리(약 48MB) 삭제 여부 — 어떤 빌드 파일도 참조하지 않음
 
 ---
 

@@ -97,7 +97,11 @@ make config=release_x64
 make install-deps     # Debian 계열 의존성 설치
 make                  # → bin/linux/clumsy
 make test             # 패킷 헬퍼 계약 테스트
+make package-deb      # → bin/linux/clumsy_0.4_amd64.deb
 ```
+
+`.deb`를 설치하면 후처리가 `setcap cap_net_admin,cap_net_raw+ep`을 적용하므로
+**sudo 없이 실행**할 수 있습니다.
 
 리눅스에서는 필터가 2단계(iptables 규칙 + clumsy 필터 표현식)로 동작하고,
 권한 처리와 duplicate 모듈에 주의할 점이 있습니다.
@@ -284,7 +288,8 @@ clumsy/
 │   ├── platform.h      # Win32 ↔ POSIX 호환 계층
 │   ├── divert.cpp      # 캡처 백엔드: WinDivert (Windows)
 │   ├── divert_linux.cpp# 캡처 백엔드: NFQUEUE (Linux)
-│   ├── filterexpr.cpp  # 필터 표현식 파서/평가기 (Linux)
+│   ├── filterexpr.cpp  # 필터 표현식 파서/평가기 + iptables 규칙 도출
+│   ├── iptables_linux.cpp # --auto-iptables 규칙 설치/제거
 │   ├── httpserver.cpp  # 내장 HTTP 서버 (REST + SSE + 정적 파일)
 │   ├── controlapi.cpp  # 트랜스포트 독립 제어 계층 (HTTP/Pipe 공용)
 │   ├── json.cpp        # 최소 JSON 파서/직렬화
@@ -315,6 +320,7 @@ clumsy/
 ├── msvc/               # Visual Studio 프로젝트
 │   └── clumsy.sln
 ├── external/           # 외부 라이브러리 (WinDivert, Windows 전용)
+├── packaging/          # .deb / .rpm 패키징 정의
 ├── tests/              # 독립 실행 검증 프로그램
 │   ├── packetutil_test.cpp   # 패킷 헬퍼 계약 테스트 (양 플랫폼 공용)
 │   └── linux/nfqtest.cpp     # NFQUEUE 능력 프로브

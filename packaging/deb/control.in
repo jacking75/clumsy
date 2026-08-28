@@ -1,0 +1,21 @@
+Package: clumsy
+Version: @VERSION@
+Section: net
+Priority: optional
+Architecture: @ARCH@
+Depends: libnetfilter-queue1, libnfnetlink0, libmnl0, libc6, libstdc++6, iptables
+Recommends: libcap2-bin
+Maintainer: clumsy contributors <noreply@example.com>
+Homepage: https://github.com/jacking75/clumsy
+Description: Controllable network condition simulator
+ clumsy intercepts live network packets and applies lag, jitter, packet loss,
+ reordering, duplication, payload tampering, TCP resets and bandwidth caps to
+ them, then re-injects them. Useful for reproducing poor network conditions
+ while testing an application.
+ .
+ On Linux it captures through NFQUEUE, so a matching iptables rule decides which
+ traffic reaches it. clumsy can install and remove those rules itself with
+ --auto-iptables.
+ .
+ Control it from the built-in web dashboard, the REST API, the Unix control
+ socket at /run/clumsy.sock, or command line arguments.

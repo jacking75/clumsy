@@ -36,7 +36,33 @@ sudo pacman -S gcc make libnetfilter_queue libmnl iptables
 
 ---
 
-## 2. 빌드
+## 2. 설치 (패키지)
+
+미리 빌드된 `.deb`이 있으면 그대로 설치하면 됩니다:
+
+```bash
+sudo dpkg -i clumsy_0.4_amd64.deb
+sudo apt-get install -f          # 의존성이 빠졌을 때만
+```
+
+설치 후처리가 `setcap cap_net_admin,cap_net_raw+ep`를 자동 적용하므로
+**sudo 없이 실행할 수 있습니다.**
+
+직접 패키지를 만들려면:
+
+```bash
+make package-deb     # → bin/linux/clumsy_0.4_amd64.deb
+make package-rpm     # rpmbuild 필요
+```
+
+패키지 없이 설치하려면 `sudo make install PREFIX=/usr/local`도 가능합니다.
+
+> `clumsy`는 `config.json`과 `web/`을 **실행 파일과 같은 디렉토리**에서 찾습니다.
+> 패키지는 실제 파일을 `/usr/share/clumsy/`에 두고 `/usr/bin/`에서 심볼릭 링크를 겁니다.
+
+---
+
+## 3. 빌드
 
 ```bash
 make                # 릴리스 빌드 → bin/linux/clumsy
@@ -55,7 +81,7 @@ clumsy는 이 파일들을 **실행 파일과 같은 디렉토리에서** 찾으
 
 ---
 
-## 3. 권한
+## 4. 권한
 
 두 가지 방법이 있습니다.
 
@@ -77,7 +103,7 @@ B 방식이나 컨테이너에서 부여한 capability도 정상 인식합니다
 
 ---
 
-## 4. Windows와 가장 크게 다른 점 — 필터가 2단계
+## 5. Windows와 가장 크게 다른 점 — 필터가 2단계
 
 Windows에서는 필터 표현식을 WinDivert 드라이버가 직접 해석해 "어떤 패킷을 가로챌지" 결정합니다.
 리눅스에는 그런 계층이 없어서 역할이 **둘로 나뉩니다**:
@@ -99,7 +125,7 @@ sudo ./clumsy --filter "udp and outbound and udp.DstPort == 9999" \
               --lag on --lag-time 100 --queue-num 0
 
 # 2) 다른 터미널에서, 대상 트래픽을 큐로 보내는 규칙 추가
-sudo iptables -I OUTPUT -m mark --mark 0xC1 -j ACCEPT          # ← 아래 5절 참고
+sudo iptables -I OUTPUT -m mark --mark 0xC1 -j ACCEPT          # ← 아래 6절 참고
 sudo iptables -A OUTPUT -p udp --dport 9999 -j NFQUEUE --queue-num 0
 
 # 3) 테스트 수행 ...
@@ -115,6 +141,38 @@ sudo iptables -D OUTPUT -m mark --mark 0xC1 -j ACCEPT
 > ```bash
 > sudo iptables -A OUTPUT -p udp --dport 9999 -j NFQUEUE --queue-num 0 --queue-bypass
 > ```
+
+### `--auto-iptables` — 규칙을 clumsy가 직접 관리 (권장)
+
+규칙을 손으로 넣고 빼는 대신 clumsy가 필터 표현식에서 규칙을 **도출해 자동으로
+설치·제거**하게 할 수 있습니다:
+
+```bash
+sudo ./clumsy --auto-iptables on \
+              --filter "udp and outbound and udp.DstPort == 9999" \
+              --lag on --lag-time 100
+```
+
+위 명령은 다음 두 규칙을 자동으로 넣고, 종료 시(정상 종료·Ctrl+C 모두) 정확히 같은
+규칙을 제거합니다:
+
+```
+-A OUTPUT -m mark --mark 0xc1 -j ACCEPT
+-A OUTPUT -p udp -m udp --dport 9999 -j NFQUEUE --queue-num 0 --queue-bypass
+```
+
+**안전 설계**
+
+- 도출된 규칙은 필터 표현식의 **상위집합**입니다. 넓게 잡는 것은 무해하지만(clumsy가
+  다시 필터링해서 비매치는 그대로 통과) 좁게 잡으면 대상 트래픽을 조용히 놓치기 때문입니다.
+  iptables로 표현할 수 없는 항목이 있으면 규칙을 넓히고 그 사실을 콘솔에 알립니다.
+- 설치할 때 쓴 문자열을 **그대로** `-D`에 넘겨 제거하므로 설치/제거가 어긋날 수 없습니다.
+- 이 프로세스가 실제로 설치한 규칙만, 역순으로 제거합니다.
+- 모든 규칙에 `--queue-bypass`가 붙습니다. 만에 하나 정리에 실패해도(SIGKILL, 전원 차단)
+  clumsy가 없으면 트래픽은 정상 통과합니다. **손으로 넣은 규칙보다 오히려 안전합니다.**
+- 설치 도중 실패하면 그때까지 넣은 규칙을 롤백합니다.
+
+제거에 실패한 규칙이 있으면 콘솔에 어떤 규칙인지 그대로 출력하므로 수동 정리가 쉽습니다.
 
 ### 지원하는 필터 표현식
 
@@ -140,7 +198,7 @@ udp and not loopback and ip.DstAddr == 198.51.100.1
 
 ---
 
-## 5. duplicate 모듈과 fwmark (중요)
+## 6. duplicate 모듈과 fwmark (중요)
 
 리눅스에서 복제 패킷은 **raw 소켓으로 재주입**됩니다. 그런데 재주입된 패킷은 OUTPUT 체인을
 다시 통과하므로, 아무 조치가 없으면 **자기가 만든 복제본이 다시 큐에 들어가 무한 증폭**됩니다.
@@ -163,33 +221,64 @@ sudo iptables -I OUTPUT -m mark --mark 0xC1 -j ACCEPT
 | 상황 | 동작 |
 |------|------|
 | outbound IPv4 복제 | 정상 동작 |
-| inbound 복제 | 복제본 드롭 (raw 소켓은 송신만 가능) |
-| IPv6 복제 | 복제본 드롭 |
+| outbound IPv6 복제 | 정상 동작 |
+| inbound 복제 | **복제본 드롭** |
+
+**inbound 복제가 불가능한 이유**: raw 소켓은 트래픽을 *내보내는* 것만 가능합니다.
+이미 도착한 패킷의 복사본을 로컬 수신 경로에 다시 밀어 넣으려면 TUN 디바이스나
+ifb 리다이렉트 같은 전혀 다른 장치가 필요합니다. Windows의 WinDivert는 커널 드라이버라
+양방향 주입이 가능하지만, 이는 NFQUEUE 모델에서는 얻을 수 없는 능력입니다.
 
 원본 패킷 자체는 어느 경우에도 정상 처리됩니다. 복제본만 생성되지 않습니다.
 
 ---
 
-## 6. Windows와 다른 점 요약
+## 7. Windows와 다른 점 요약
 
 | 항목 | Windows | Linux |
 |------|---------|-------|
 | 캡처 백엔드 | WinDivert 커널 드라이버 | NFQUEUE (`libnetfilter_queue`) |
-| 대상 선택 | 필터 표현식만 | iptables 규칙 + 필터 표현식 |
+| 대상 선택 | 필터 표현식만 | iptables 규칙 + 필터 표현식 (`--auto-iptables`로 자동화 가능) |
 | 권한 | 관리자(UAC) | `CAP_NET_ADMIN` |
 | 권한 상승 | `--elevate on`으로 UAC 재실행 | 불가 — sudo/setcap 안내만 출력 |
-| Named Pipe API | 지원 | **미지원** (HTTP API 사용) |
+| Named Pipe API | 지원 (`\\.\pipe\clumsy`) | Unix 도메인 소켓 (`/run/clumsy.sock`) |
 | 웹 대시보드 / REST / SSE | 지원 | 지원 (동일) |
 | `--process` 필터 | TCP/UDP 포트 테이블 | `/proc/<pid>/fd` + `/proc/net/*` |
-| duplicate 모듈 | 제약 없음 | outbound IPv4만 (5절 참고) |
+| duplicate 모듈 | 제약 없음 | outbound만 (IPv4/IPv6), 6절 참고 |
 | pcap / 리포트 / 시나리오 / 프로파일 | 지원 | 지원 (동일) |
 
-Named Pipe만 빠진 이유: 제어 계층(`controlapi.cpp`)이 양쪽 공용이라 HTTP API로 모든 명령을
-쓸 수 있고, 아무도 쓰지 않을 리눅스 전용 IPC를 새로 만들 이유가 없기 때문입니다.
+### 제어 소켓 (Named Pipe 대응)
+
+리눅스에서는 Named Pipe 대신 **Unix 도메인 소켓**이 같은 자리를 채웁니다.
+**프로토콜은 완전히 동일**합니다 — 양쪽 모두 `controlDispatchJson()`을 그대로 호출하므로
+JSON 요청/응답이 바이트 단위로 같습니다. 기존 파이프 자동화는 연결 부분만 바꾸면 됩니다.
+
+- 경로: `/run/clumsy.sock` (권한이 없으면 `/tmp/clumsy.sock`로 폴백)
+- 퍼미션 0666 — 권한 없는 자동화 스크립트도 제어 가능 (Named Pipe의 기본 접근성과 동일)
+- 종료 시 소켓 파일 자동 삭제
+
+Python 예시:
+
+```python
+import socket, json
+
+def clumsy(cmd):
+    s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    s.connect("/run/clumsy.sock")
+    s.sendall(json.dumps(cmd).encode())
+    resp = json.loads(s.recv(65536))
+    s.close()
+    return resp
+
+clumsy({"cmd": "set", "module": "lag", "enabled": True, "lag-time": 200})
+print(clumsy({"cmd": "get_stats"}))
+```
+
+지원 명령은 [manual.md 7-2절](../manual.md)의 Named Pipe 목록과 동일합니다.
 
 ---
 
-## 7. WSL2에서 개발하기
+## 8. WSL2에서 개발하기
 
 이 포팅은 WSL2 Ubuntu 24.04(커널 6.18.35.2) + g++-16에서 개발·검증했습니다.
 NFQUEUE 모듈이 기본 제공되므로 커스텀 커널이 필요 없습니다.
@@ -206,7 +295,7 @@ make && make test
 
 ---
 
-## 8. 문제 해결
+## 9. 문제 해결
 
 **`Failed to open NFQUEUE (Operation not permitted)`**
 권한 부족입니다. 3절을 보세요.
@@ -231,4 +320,14 @@ clumsy가 따라가지 못해 커널이 패킷을 버렸습니다. 모듈 버퍼
 필터를 좁혀 트래픽을 줄이세요.
 
 **duplicate를 켜니 트래픽이 폭발한다**
-fwmark ACCEPT 규칙이 없습니다. 5절을 보세요.
+fwmark ACCEPT 규칙이 없습니다. 6절을 보세요. `--auto-iptables on`을 쓰면 이 규칙이
+자동으로 들어갑니다.
+
+**종료했는데 iptables 규칙이 남아 있다**
+`--auto-iptables`를 썼다면 clumsy가 어떤 규칙을 지우지 못했는지 콘솔에 출력합니다.
+그 줄을 그대로 `-D`로 바꿔 실행하면 됩니다. 자동 규칙에는 `--queue-bypass`가 붙어 있으므로
+남아 있어도 트래픽은 정상 흐릅니다.
+
+**제어 소켓에 연결이 안 된다**
+`/run/clumsy.sock`이 없으면 `/tmp/clumsy.sock`으로 폴백됐을 수 있습니다.
+시작 배너의 `Control socket:` 줄에 실제 경로가 표시됩니다.

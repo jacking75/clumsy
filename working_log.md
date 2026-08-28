@@ -1,5 +1,32 @@
 # Working Log
 
+## 2026-08-28 09:49 KST — Phase 4 선택 과제 4건 구현
+
+Phase 4 완료 시 별도 과제로 분리했던 항목들을 이어서 구현했습니다.
+
+- **`--auto-iptables`**: `filterexpr.cpp`에 `filterDeriveIptables()`를 추가해 필터 AST에서
+  iptables match 인자를 도출하고, 신규 `iptables_linux.cpp`가 설치·제거를 담당합니다.
+  남은 NFQUEUE 규칙은 트래픽을 통째로 블랙홀로 만들기 때문에 "절대 규칙을 남기지 않는다"를
+  설계 기준으로 삼았습니다 — 도출 규칙은 필터의 상위집합(좁으면 조용히 놓침, 넓으면 무해),
+  `-I`에 쓴 문자열을 그대로 `-D`에 전달, 자기가 설치한 것만 역순 제거, 그리고 모든 규칙에
+  `--queue-bypass`를 붙여 SIGKILL로 정리를 못 해도 트래픽이 통과하게 했습니다.
+- **리눅스 제어 소켓**: 당초 "HTTP로 충분"이라 판단했으나 기존 Named Pipe 자동화의 이식
+  비용을 고려해 Unix 도메인 소켓(`/run/clumsy.sock`, 폴백 `/tmp`)으로 구현. 양쪽 모두
+  `controlDispatchJson()`을 호출하므로 JSON이 바이트 단위로 동일합니다.
+- **IPv6 복제 주입**: `AF_INET6` raw 소켓 추가로 outbound IPv6 복제 지원.
+  inbound 복제는 raw 소켓이 송신 전용이라 구조적으로 불가 — TUN/ifb가 필요하며
+  NFQUEUE 모델에서는 얻을 수 없는 능력이라 사유와 함께 문서화했습니다.
+- **패키징**: `make package-deb`로 `.deb` 생성. postinst가 `setcap cap_net_admin,cap_net_raw+ep`을
+  적용해 **sudo 없이 실행 가능**(setuid root 대신 필요한 두 권한만). 데이터는
+  `/usr/share/clumsy/`에 두고 `/usr/bin/`에서 심볼릭 링크(clumsy가 실행 파일 옆에서 찾기 때문).
+  스테이징은 `/tmp`에서 — `/mnt/c` 체크아웃은 전부 0777로 보여 `dpkg-deb`가 거부합니다.
+- **검증**: 제어 소켓 7항목 + auto-iptables 6항목(자동 설치 → 실제 drop 동작 → SIGINT 후
+  잔여 규칙 0개) + 패키지 11항목(빌드→설치→capability→sudo 없이 실행→제거) 전부 통과.
+  Windows MSVC Debug/Release 경고 0개 회귀 없음, 리눅스 make 경고 0개, 계약 테스트 16항목 통과.
+- **남은 항목**: `.rpm` 실제 빌드 검증(rpm 툴체인 미설치, spec만 작성),
+  MinGW(clang) 빌드 검증, Windows 실패킷 캡처 회귀(관리자 권한 필요),
+  `external/iup-*` 삭제 여부 결정.
+
 ## 2026-08-28 01:12 KST — Phase 4.2~4.6 리눅스 지원 완성
 
 - **4.2 리눅스 캡처 백엔드**: `divert_linux.cpp`(libnetfilter_queue)를 `divert.cpp`와 동일한

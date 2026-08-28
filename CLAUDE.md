@@ -20,7 +20,7 @@ Windows 전용
   packetutil_win.cpp← 패킷 검사 헬퍼 (페이로드/체크섬/RST)
   elevate.cpp       ← UAC 권한 상승
   procfilter.cpp    ← 프로세스→포트 조회 (GetExtendedTcp/UdpTable)
-  pipe.cpp          ← Named Pipe 트랜스포트 (POSIX에서는 빈 구현)
+  pipe.cpp          ← 제어 트랜스포트: Windows는 Named Pipe, POSIX는 Unix 소켓
 
 Linux 전용
   platform_linux.cpp  ← 스레드/뮤텍스/핸들 구현
@@ -29,6 +29,7 @@ Linux 전용
   elevate_linux.cpp   ← CAP_NET_ADMIN 확인
   procfilter_linux.cpp← 프로세스→포트 조회 (/proc/<pid>/fd + /proc/net/*)
   filterexpr.cpp      ← 필터 표현식 파서/평가기 (WinDivert 문법 서브셋)
+  iptables_linux.cpp  ← --auto-iptables 규칙 설치/제거
 ```
 
 ### 플랫폼 분기 규칙
@@ -200,7 +201,11 @@ WinDivertRecv()
   리눅스 포팅 개발·검증 전용입니다.
 - 리눅스에서 duplicate 모듈을 쓰려면 fwmark ACCEPT 규칙이 **반드시** 필요합니다. 없으면
   재주입된 복제본이 큐로 되돌아와 무한 증폭됩니다(실측 10 → 246,106).
-  자세한 내용은 [docs/LINUX.md](docs/LINUX.md) 5절.
+  `--auto-iptables on`이 이 규칙까지 알아서 넣어줍니다. 자세한 내용은
+  [docs/LINUX.md](docs/LINUX.md) 6절.
+- `--auto-iptables`가 설치하는 규칙에는 **항상 `--queue-bypass`가 붙어야 합니다.**
+  정리에 실패했을 때 트래픽이 블랙홀이 되는 것과 그냥 통과하는 것의 차이입니다.
+  `iptables_linux.cpp`를 수정할 때 이 불변식을 깨지 마세요.
 
 ---
 

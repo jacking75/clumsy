@@ -43,3 +43,31 @@ int filterMatch(const FilterProgram *prog, const PacketMeta *meta,
                 const char *packet, UINT len);
 
 void filterFree(FilterProgram *prog);
+
+// ---------------------------------------------------------------------------
+// iptables rule derivation  (Phase 4.3 second tier, --auto-iptables)
+//
+// Turns the expression into iptables match arguments so clumsy can install the
+// NFQUEUE rules itself instead of making the operator hand-write them.
+//
+// The derived rules are deliberately a SUPERSET of what the expression matches.
+// Over-capturing is harmless - filterMatch() re-filters every packet and passes
+// non-matching ones straight through - whereas under-capturing would silently
+// miss the traffic under test. Anything that cannot be translated therefore
+// widens the rule rather than narrowing it.
+// ---------------------------------------------------------------------------
+#define IPT_CHAIN_OUTPUT 1
+#define IPT_CHAIN_INPUT  2
+
+typedef struct {
+    int  chains;                 // bit mask of IPT_CHAIN_*
+    char match[256];             // iptables match args, e.g. "-p udp --dport 7777"
+    int  ipv6;                   // 1 = install with ip6tables instead
+} IptablesRule;
+
+#define MAX_DERIVED_RULES 8
+
+// Fills rules[] and returns how many were produced (>=1). exact is set to 0 when
+// the rules are wider than the expression, which is worth telling the operator.
+int filterDeriveIptables(const FilterProgram *prog, IptablesRule *rules,
+                         int maxRules, int *exact);

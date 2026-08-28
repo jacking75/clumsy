@@ -1,0 +1,30 @@
+#!/bin/sh
+# clumsy post-install
+#
+# Grants the capabilities clumsy needs so it can run without sudo:
+#   CAP_NET_ADMIN - open an NFQUEUE
+#   CAP_NET_RAW   - the raw socket the duplicate module injects clones through
+#
+# Deliberately not a setuid binary: file capabilities give exactly these two
+# privileges instead of full root.
+set -e
+
+BIN=/usr/bin/clumsy
+
+case "$1" in
+    configure)
+        if command -v setcap >/dev/null 2>&1; then
+            if setcap cap_net_admin,cap_net_raw+ep "$BIN" 2>/dev/null; then
+                echo "clumsy: granted CAP_NET_ADMIN and CAP_NET_RAW to $BIN"
+            else
+                # Common on filesystems without xattr support, and inside some
+                # container images. Not fatal - sudo still works.
+                echo "clumsy: could not set capabilities (run clumsy with sudo instead)" >&2
+            fi
+        else
+            echo "clumsy: setcap not found; install libcap2-bin or run clumsy with sudo" >&2
+        fi
+        ;;
+esac
+
+exit 0

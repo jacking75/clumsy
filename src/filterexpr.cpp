@@ -495,3 +495,173 @@ int filterMatch(const FilterProgram *prog, const PacketMeta *meta,
 void filterFree(FilterProgram *prog) {
     delete prog;
 }
+
+// ---------------------------------------------------------------------------
+// iptables rule derivation
+// ---------------------------------------------------------------------------
+
+namespace {
+
+// Constraints collected from one AND-chain. Anything left at its default means
+// "unconstrained", which widens the rule - the safe direction.
+struct Constraints {
+    int      chains   = IPT_CHAIN_OUTPUT | IPT_CHAIN_INPUT;
+    int      proto    = 0;      // 0 = any, else IP protocol number
+    int      ipv6     = -1;     // -1 unknown, 0 = v4, 1 = v6
+    long     dstPort  = -1;
+    long     srcPort  = -1;
+    UINT32   dstAddr  = 0;      // 0 = unconstrained
+    UINT32   srcAddr  = 0;
+    bool     widened  = false;  // something could not be expressed
+};
+
+// Walks one AND-chain, folding every term it understands into c.
+// Terms under a NOT, or any comparison iptables cannot express as an equality,
+// only mark the result as widened.
+void collect(const FilterProgram *prog, int idx, Constraints &c, bool negated) {
+    if (idx < 0 || idx >= (int)prog->nodes.size()) return;
+    const Node &n = prog->nodes[(size_t)idx];
+
+    switch (n.kind) {
+    case N_AND:
+        collect(prog, n.left,  c, negated);
+        collect(prog, n.right, c, negated);
+        return;
+    case N_NOT:
+        // A negated term cannot narrow an iptables rule safely; note it and
+        // keep the rule as wide as it already is.
+        c.widened = true;
+        collect(prog, n.left, c, !negated);
+        return;
+    case N_OR:
+        // Handled by splitting before we get here; reaching it means a nested
+        // OR that we choose not to expand.
+        c.widened = true;
+        return;
+    case N_TRUE:
+        return;
+    case N_FALSE:
+        c.widened = true;
+        return;
+    case N_OUTBOUND:
+        if (!negated) c.chains = IPT_CHAIN_OUTPUT;
+        return;
+    case N_INBOUND:
+        if (!negated) c.chains = IPT_CHAIN_INPUT;
+        return;
+    case N_LOOPBACK:
+        // -i lo / -o lo would work, but combining it with the chain split adds
+        // little: loopback traffic already matches the generated rules.
+        c.widened = true;
+        return;
+    case N_IPV4:
+        if (!negated) c.ipv6 = 0;
+        return;
+    case N_IPV6:
+        if (!negated) c.ipv6 = 1;
+        return;
+    case N_CMP:
+        if (negated || n.op != OP_EQ) { c.widened = true; return; }
+        switch (n.field) {
+        case F_IP_PROTO:     c.proto   = (int)n.value;  break;
+        case F_TCP_SRCPORT:  c.proto = 6;  c.srcPort = (long)n.value; break;
+        case F_TCP_DSTPORT:  c.proto = 6;  c.dstPort = (long)n.value; break;
+        case F_UDP_SRCPORT:  c.proto = 17; c.srcPort = (long)n.value; break;
+        case F_UDP_DSTPORT:  c.proto = 17; c.dstPort = (long)n.value; break;
+        case F_IP_SRC:       c.srcAddr = n.value; c.ipv6 = 0; break;
+        case F_IP_DST:       c.dstAddr = n.value; c.ipv6 = 0; break;
+        }
+        return;
+    }
+}
+
+// Splits the top level on OR so each branch becomes its own rule; an OR of two
+// ports is extremely common ("port 7777 in either direction") and one rule per
+// branch keeps those precise.
+void splitOr(const FilterProgram *prog, int idx, std::vector<int> &out, int depth) {
+    if (idx < 0 || idx >= (int)prog->nodes.size()) return;
+    const Node &n = prog->nodes[(size_t)idx];
+    // Bail out of pathological nesting rather than generating hundreds of rules.
+    if (n.kind == N_OR && depth < 4 && out.size() < MAX_DERIVED_RULES) {
+        splitOr(prog, n.left,  out, depth + 1);
+        splitOr(prog, n.right, out, depth + 1);
+        return;
+    }
+    out.push_back(idx);
+}
+
+void formatAddr(UINT32 addr, char *buf, size_t bufSize) {
+    snprintf(buf, bufSize, "%u.%u.%u.%u",
+             (addr >> 24) & 0xFF, (addr >> 16) & 0xFF,
+             (addr >> 8) & 0xFF, addr & 0xFF);
+}
+
+void buildMatch(const Constraints &c, char *out, size_t outSize) {
+    char buf[256];
+    int pos = 0;
+    buf[0] = '\0';
+
+    if (c.proto == 6)       pos += snprintf(buf + pos, sizeof(buf) - pos, "-p tcp ");
+    else if (c.proto == 17) pos += snprintf(buf + pos, sizeof(buf) - pos, "-p udp ");
+    else if (c.proto == 1)  pos += snprintf(buf + pos, sizeof(buf) - pos, "-p icmp ");
+    else if (c.proto > 0)   pos += snprintf(buf + pos, sizeof(buf) - pos, "-p %d ", c.proto);
+
+    // Ports need a protocol; without one iptables rejects --dport.
+    if (c.proto == 6 || c.proto == 17) {
+        if (c.dstPort >= 0) pos += snprintf(buf + pos, sizeof(buf) - pos, "--dport %ld ", c.dstPort);
+        if (c.srcPort >= 0) pos += snprintf(buf + pos, sizeof(buf) - pos, "--sport %ld ", c.srcPort);
+    }
+    if (c.srcAddr) {
+        char a[32]; formatAddr(c.srcAddr, a, sizeof(a));
+        pos += snprintf(buf + pos, sizeof(buf) - pos, "-s %s ", a);
+    }
+    if (c.dstAddr) {
+        char a[32]; formatAddr(c.dstAddr, a, sizeof(a));
+        pos += snprintf(buf + pos, sizeof(buf) - pos, "-d %s ", a);
+    }
+
+    // Trim the trailing space so the assembled command line stays tidy.
+    while (pos > 0 && buf[pos - 1] == ' ') buf[--pos] = '\0';
+    snprintf(out, outSize, "%s", buf);
+}
+
+} // namespace
+
+int filterDeriveIptables(const FilterProgram *prog, IptablesRule *rules,
+                         int maxRules, int *exact) {
+    if (exact) *exact = 1;
+    if (!prog || !rules || maxRules <= 0) return 0;
+
+    std::vector<int> branches;
+    if (prog->root >= 0) splitOr(prog, prog->root, branches, 0);
+    if (branches.empty()) branches.push_back(prog->root);
+
+    int count = 0;
+    for (size_t i = 0; i < branches.size() && count < maxRules; ++i) {
+        Constraints c;
+        collect(prog, branches[i], c, false);
+        if (c.widened && exact) *exact = 0;
+
+        rules[count].chains = c.chains;
+        rules[count].ipv6   = (c.ipv6 == 1) ? 1 : 0;
+        buildMatch(c, rules[count].match, sizeof(rules[count].match));
+        ++count;
+    }
+
+    // Deduplicate: an OR of two ports on the same protocol often collapses to
+    // identical match strings once direction is folded in.
+    int unique = 0;
+    for (int i = 0; i < count; ++i) {
+        bool dup = false;
+        for (int j = 0; j < unique; ++j) {
+            if (rules[j].chains == rules[i].chains &&
+                rules[j].ipv6 == rules[i].ipv6 &&
+                strcmp(rules[j].match, rules[i].match) == 0) {
+                dup = true;
+                break;
+            }
+        }
+        if (!dup) rules[unique++] = rules[i];
+    }
+    return unique;
+}

@@ -13,6 +13,9 @@
 #   make              release build -> bin/linux/clumsy
 #   make DEBUG=1      debug build with -O0 -g and verbose logging on
 #   make test         build and run the packet helper conformance test
+#   make install      install to $(PREFIX)/bin (default /usr/local)
+#   make package-deb  build a .deb into bin/linux/
+#   make package-rpm  build an .rpm (needs rpmbuild)
 #   make clean
 
 # make predefines CXX=g++, so ?= would never take effect; only override the
@@ -61,7 +64,8 @@ SOURCES += \
 	$(SRCDIR)/divert_linux.cpp \
 	$(SRCDIR)/packetutil_linux.cpp \
 	$(SRCDIR)/elevate_linux.cpp \
-	$(SRCDIR)/procfilter_linux.cpp
+	$(SRCDIR)/procfilter_linux.cpp \
+	$(SRCDIR)/iptables_linux.cpp
 
 OBJECTS := $(SOURCES:$(SRCDIR)/%.cpp=$(OBJDIR)/%.o)
 DEPS    := $(OBJECTS:.o=.d)
@@ -79,7 +83,14 @@ CXXFLAGS := $(CXXSTD) $(WARNINGS) $(BUILDFLAGS) -I$(SRCDIR) \
 LDFLAGS  := -pthread -ldl \
             $(shell pkg-config --libs libnetfilter_queue 2>/dev/null || echo -lnetfilter_queue -lnfnetlink)
 
-.PHONY: all clean test run install-deps
+VERSION := 0.4
+DEBARCH := $(shell dpkg --print-architecture 2>/dev/null || echo amd64)
+# Staged outside the source tree on purpose: dpkg-deb refuses a control
+# directory whose mode is not 0755-0775, and a checkout on a Windows mount
+# (WSL /mnt/c) reports everything as 0777. /tmp always honours the mode.
+PKGDIR  := $(shell echo $${TMPDIR:-/tmp})/clumsy-pkg-$(shell id -u)
+
+.PHONY: all clean test run install-deps install package-deb package-rpm
 
 all: $(TARGET)
 
@@ -108,6 +119,52 @@ $(OBJDIR)/packetutil_test: tests/packetutil_test.cpp $(SRCDIR)/packetutil_linux.
 
 install-deps:
 	sudo apt-get install -y g++-16 libnetfilter-queue-dev libmnl-dev iptables
+
+# Plain install, for people who do not want a package.
+DESTDIR ?=
+PREFIX  ?= /usr/local
+install: $(TARGET)
+	install -D -m 0755 $(TARGET) $(DESTDIR)$(PREFIX)/bin/clumsy
+	install -D -m 0644 etc/web/index.html $(DESTDIR)$(PREFIX)/bin/web/index.html
+	install -D -m 0644 etc/config.json $(DESTDIR)$(PREFIX)/bin/config.json
+	@echo "installed to $(DESTDIR)$(PREFIX)/bin/clumsy"
+	@echo "grant capabilities with:"
+	@echo "  sudo setcap cap_net_admin,cap_net_raw+ep $(DESTDIR)$(PREFIX)/bin/clumsy"
+
+# ---------------------------------------------------------------------------
+# Packaging
+#
+# clumsy looks for config.json and web/ next to its own executable, so the data
+# files are symlinked from /usr/bin back into /usr/share/clumsy rather than
+# duplicated.
+# ---------------------------------------------------------------------------
+package-deb: $(TARGET)
+	@command -v dpkg-deb >/dev/null || { echo "dpkg-deb not found"; exit 1; }
+	rm -rf $(PKGDIR)
+	mkdir -p $(PKGDIR)/DEBIAN
+	mkdir -p $(PKGDIR)/usr/bin/web
+	mkdir -p $(PKGDIR)/usr/share/clumsy/web
+	mkdir -p $(PKGDIR)/usr/share/doc/clumsy
+	sed -e 's/@VERSION@/$(VERSION)/' -e 's/@ARCH@/$(DEBARCH)/' 	    packaging/deb/control.in > $(PKGDIR)/DEBIAN/control
+	install -m 0755 packaging/deb/postinst $(PKGDIR)/DEBIAN/postinst
+	install -m 0755 $(TARGET) $(PKGDIR)/usr/bin/clumsy
+	install -m 0644 etc/config.json etc/config.txt etc/scenario-example.json 	    $(PKGDIR)/usr/share/clumsy/
+	install -m 0644 etc/web/index.html $(PKGDIR)/usr/share/clumsy/web/
+	install -m 0644 docs/LINUX.md README.md $(PKGDIR)/usr/share/doc/clumsy/
+	ln -sf /usr/share/clumsy/config.json     $(PKGDIR)/usr/bin/config.json
+	ln -sf /usr/share/clumsy/web/index.html  $(PKGDIR)/usr/bin/web/index.html
+	chmod 0755 $(PKGDIR)/DEBIAN
+	dpkg-deb --build --root-owner-group $(PKGDIR) $(BINDIR)/clumsy_$(VERSION)_$(DEBARCH).deb
+	rm -rf $(PKGDIR)
+	@echo "built $(BINDIR)/clumsy_$(VERSION)_$(DEBARCH).deb"
+
+package-rpm:
+	@command -v rpmbuild >/dev/null || { echo "rpmbuild not found (install rpm-build)"; exit 1; }
+	rm -rf $(OBJDIR)/rpmbuild
+	mkdir -p $(OBJDIR)/rpmbuild/SOURCES
+	git archive --format=tar.gz --prefix=clumsy-$(VERSION)/ 	    -o $(OBJDIR)/rpmbuild/SOURCES/clumsy-$(VERSION).tar.gz HEAD
+	rpmbuild -bb --define "_topdir $(CURDIR)/$(OBJDIR)/rpmbuild" packaging/clumsy.spec
+	@echo "rpm(s) under $(OBJDIR)/rpmbuild/RPMS/"
 
 clean:
 	rm -rf $(OBJDIR) $(BINDIR)
