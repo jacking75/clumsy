@@ -1,5 +1,25 @@
 # Working Log
 
+## 2026-08-28 13:46 KST — ROADMAP-v2 전체 구현 (T1~T8)
+
+- `docs/ROADMAP-v2.md`의 8개 항목을 모두 구현. 신규 모듈 `corrupt`(비트 에러),
+  jitter 지연 분포 3종, Prometheus `/metrics`, 웹 시나리오 에디터, 프로파일 삭제와
+  인라인 적용, 대시보드 테마 토글·스파크라인, pcap 재생, 지연 히스토그램(p50/p95/p99).
+- 신규 소스 3개(`corrupt.cpp`, `latency.cpp`, `pcapreplay.cpp`)와 백엔드 훅
+  `packetBackendInject()`를 Windows(send-only WinDivert 핸들)·Linux(fwmark raw 소켓)
+  양쪽에 구현. `ParamSpec`에 `enum` 타입과 `options`를 추가해 대시보드가 모듈을
+  모르는 채 드롭다운을 그리도록 함.
+- 검증: Windows 빌드 경고 0, Linux 빌드 경고 0, `make test` 51 assert,
+  REST 회귀 Linux 57/57 · Windows 55/55, 실패킷 검증 24/24.
+  pcap 25패킷 캡처→재생→수신 왕복까지 확인.
+- 테스트 자동화 3종 신규 작성(`latency_test.cpp`, `api_test.sh/.ps1`,
+  `behaviour_test.sh`). 이 중 `latency_test.cpp`가 분위수 보간의 87ms 과대추정을
+  잡아내 양 끝 구간을 관측 min/max로 좁히는 수정으로 이어짐.
+- 브라우저로 대시보드를 직접 조작해 결함 3건 추가 발견·수정: 스파크라인이 항상
+  비어 있던 `dtMs` 계산 순서, 다크 모드 링크 가독성, 라이트 모드 링크 대비 미달.
+- 미완: Windows 관리자 권한 pcap 재생 실트래픽 검증. 백신(Symantec/CrowdStrike)이
+  빌드 직후 `clumsy.exe`를 격리해 장시간 실행이 불가능. 코드 문제 아님.
+
 ## 2026-08-28 12:20 KST — gh-pages 삭제 (내 오판 정정)
 
 - 4.11에서 gh-pages를 "실제 서비스 중인 프로젝트 웹사이트"라는 이유로 남겨뒀는데,

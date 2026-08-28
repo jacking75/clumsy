@@ -15,7 +15,7 @@
 #define MSG_BUFSIZE 512
 #define FILTER_BUFSIZE 1024
 #define NAME_SIZE 16
-#define MODULE_CNT 11
+#define MODULE_CNT 12
 // main loop tick; also the Server-Sent Events push interval
 #define CLOCK_TICK_MS 200
 // kept for source compatibility with pre-Phase-2 call sites
@@ -98,6 +98,10 @@ typedef struct _NODE {
     PacketMeta meta;
     PacketBackendMeta backend;
     DWORD timestamp; // ! timestamp isn't filled when creating node since it's only needed for lag
+    // When the packet entered a delay buffer. lag stores the same value in
+    // timestamp, but jitter puts its scheduled release time there, so the
+    // latency histogram needs its own field to measure the real wait.
+    DWORD enqueueTime;
     struct _NODE *prev, *next;
 } PacketNode;
 
@@ -131,11 +135,17 @@ typedef struct { char key[PARAM_KEY_SIZE]; char val[PARAM_VAL_SIZE]; } ParamKV;
 //   "percent" — real number 0..100, passed to setParam as a percentage string
 //   "bool"    — "true" / "false"
 //   "action"  — write-only trigger; UI renders a button that posts true
+//   "enum"    — one of the comma-separated names in `options`; UI renders a
+//               dropdown. setParam still takes the name as a string.
 typedef struct {
     const char *key;        // same key setParam takes (e.g. "lag-time")
     const char *label;      // human readable display name
     const char *type;
     double minVal, maxVal;  // input range (0, 0 when not applicable)
+    // Comma-separated choices for type=="enum" (e.g. "uniform,normal,pareto").
+    // NULL for every other type. Trailing member so existing ParamSpec tables
+    // that predate it still compile unchanged.
+    const char *options;
 } ParamSpec;
 
 // module
@@ -178,6 +188,7 @@ extern Module throttleModule;
 extern Module oodModule;
 extern Module dupModule;
 extern Module tamperModule;
+extern Module corruptModule;
 extern Module resetModule;
 extern Module bandwidthModule;
 extern Module* modules[MODULE_CNT]; // all modules in a list
@@ -207,6 +218,7 @@ int lagGetBufSize(void);
 int jitterGetBufSize(void);
 int bandwidthGetBufSize(void);
 LONG bandwidthGetLimitKBps(void);
+LONG corruptGetBitsFlipped(void);
 
 // Stats log file output  (statslog.cpp)
 void statsLogStart(const char *path, int intervalSec);
@@ -237,6 +249,9 @@ int applyModuleKV(const char *key, const char *value);
 
 // Scenario scripting  (scenario.cpp)
 void scenarioLoad(const char *path);
+// Same parser fed from memory instead of a file, so the dashboard can push a
+// scenario it just composed without writing it to disk first.
+void scenarioLoadString(const char *json);
 void scenarioStart(void);
 void scenarioStop(void);
 void scenarioTick(void);
@@ -250,6 +265,7 @@ int         profileApply(const char *name); // 1=ok, 0=not found
 int         profileSaveCurrent(const char *name); // save current module state, 1=ok
 int         profileCount(void);
 const char* profileGetName(int ix);      // 0-indexed
+int         profileDelete(const char *name); // 1=deleted, 0=not found
 
 // pcap export  (pcapexport.cpp, Phase 3.1)
 // Packets can be dumped as captured (PRE, before any module ran) or as they go
@@ -278,6 +294,43 @@ int  reportWriteHtml(const char *path);
 // Same report rendered into a caller-owned buffer (used by the web download).
 // Returns the number of bytes written, or 0 on failure.
 int  reportRenderHtml(char *buf, int bufSize);
+
+// Latency histogram  (latency.cpp)
+//
+// lag and jitter report how long each packet actually sat in their buffer.
+// Percentiles are read off the histogram rather than a stored sample list, so
+// the cost stays at one increment per delayed packet no matter how long the
+// session runs.
+#define LATENCY_BUCKETS 13
+void  latencyReset(void);
+// Called from a module's process(), i.e. inside the capture mutex.
+void  latencyRecord(DWORD delayMs);
+LONG  latencyCount(void);
+LONG  latencyMin(void);
+LONG  latencyMax(void);
+double latencyMean(void);
+// Upper bound in ms of bucket ix; the last bucket is unbounded and returns 0.
+LONG  latencyBucketUpper(int ix);
+LONG  latencyBucketCount(int ix);
+// Linear interpolation inside the containing bucket. pct is 0..100.
+double latencyPercentile(double pct);
+// Exact sum of all recorded delays in ms (kept as two LONGs to stay lock-free).
+double latencySumMs(void);
+
+// pcap replay  (pcapreplay.cpp)
+//
+// The inverse of pcapexport: reads a libpcap file back and re-injects the
+// packets through the capture backend, preserving the recorded inter-packet
+// timing. See docs and manual.md for the platform limits.
+void pcapReplayInit(void);
+int  pcapReplayStart(const char *path, double speed, int loopForever,
+                     char *errBuf, int errSize);
+void pcapReplayStop(void);
+int  pcapReplayIsActive(void);
+long pcapReplayRead(void);
+long pcapReplaySent(void);
+long pcapReplayFailed(void);
+const char* pcapReplayPath(void);
 
 // Plugin modules  (plugin.cpp, Phase 3.6)
 int  pluginLoadDir(const char *dir);
@@ -308,6 +361,14 @@ BOOL checkDirection(BOOL outboundPacket, short handleInbound, short handleOutbou
 void packetBackendOnFree(PacketNode *node);
 // Prepares a freshly cloned node's backend state. See cloneNode().
 void packetBackendPrepareClone(const PacketNode *src, PacketNode *dst);
+// Injects a packet that did not come from the capture queue (pcap replay).
+// Opens whatever the backend needs on first use, independently of whether a
+// capture is running. Returns 1 when the packet was handed to the stack.
+// Windows: a send-only WinDivert handle, flagged Impostor. Linux: a raw socket
+// carrying the injection fwmark. Outbound only on Linux - see docs/LINUX.md.
+int  packetBackendInject(char *packet, UINT len, BOOL outbound);
+// Releases anything packetBackendInject() opened. Safe to call when unused.
+void packetBackendInjectClose(void);
 
 // ---------------------------------------------------------------------------
 // Packet inspection helpers  (Phase 4.1)

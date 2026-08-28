@@ -157,6 +157,7 @@
     <ClCompile Include="$(ProjectRoot)src\duplicate.cpp" />
     <ClCompile Include="$(ProjectRoot)src\ood.cpp" />
     <ClCompile Include="$(ProjectRoot)src\tamper.cpp" />
+    <ClCompile Include="$(ProjectRoot)src\corrupt.cpp" />
     <ClCompile Include="$(ProjectRoot)src\reset.cpp" />
     <ClCompile Include="$(ProjectRoot)src\bandwidth.cpp" />
     <ClCompile Include="$(ProjectRoot)src\pipe.cpp" />
@@ -169,6 +170,8 @@
     <ClCompile Include="$(ProjectRoot)src\httpserver.cpp" />
     <ClCompile Include="$(ProjectRoot)src\pcapexport.cpp" />
     <ClCompile Include="$(ProjectRoot)src\report.cpp" />
+    <ClCompile Include="$(ProjectRoot)src\latency.cpp" />
+    <ClCompile Include="$(ProjectRoot)src\pcapreplay.cpp" />
     <ClCompile Include="$(ProjectRoot)src\plugin.cpp" />
     <ClCompile Include="$(ProjectRoot)src\packetutil_win.cpp" />
   </ItemGroup>

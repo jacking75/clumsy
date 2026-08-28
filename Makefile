@@ -42,6 +42,7 @@ SOURCES := \
 	$(SRCDIR)/duplicate.cpp \
 	$(SRCDIR)/ood.cpp \
 	$(SRCDIR)/tamper.cpp \
+	$(SRCDIR)/corrupt.cpp \
 	$(SRCDIR)/reset.cpp \
 	$(SRCDIR)/bandwidth.cpp \
 	$(SRCDIR)/pipe.cpp \
@@ -52,6 +53,8 @@ SOURCES := \
 	$(SRCDIR)/controlapi.cpp \
 	$(SRCDIR)/httpserver.cpp \
 	$(SRCDIR)/pcapexport.cpp \
+	$(SRCDIR)/pcapreplay.cpp \
+	$(SRCDIR)/latency.cpp \
 	$(SRCDIR)/report.cpp \
 	$(SRCDIR)/plugin.cpp \
 	$(SRCDIR)/filterexpr.cpp
@@ -107,13 +110,24 @@ $(OBJDIR)/%.o: $(SRCDIR)/%.cpp | $(OBJDIR)
 $(OBJDIR) $(BINDIR):
 	@mkdir -p $@
 
-# Conformance test for the backend-neutral packet helpers. Runs the Linux
-# implementation against the same assertions the Windows one must satisfy.
-test: $(OBJDIR)/packetutil_test
+# Unit tests that need no privileges. The packet helpers run the Linux
+# implementation against the same assertions the Windows one must satisfy; the
+# latency test checks the percentile interpolation against distributions whose
+# answers are known in advance.
+#
+# The two privileged suites are not here on purpose: tests/linux/api_test.sh
+# needs a free TCP port and tests/linux/behaviour_test.sh needs root.
+test: $(OBJDIR)/packetutil_test $(OBJDIR)/latency_test
 	@$(OBJDIR)/packetutil_test
+	@echo
+	@$(OBJDIR)/latency_test
 
 $(OBJDIR)/packetutil_test: tests/packetutil_test.cpp $(SRCDIR)/packetutil_linux.cpp \
                            $(SRCDIR)/platform_linux.cpp | $(OBJDIR)
+	$(CXX) $(CXXSTD) $(WARNINGS) -O1 -I$(SRCDIR) $^ -o $@ -pthread
+
+$(OBJDIR)/latency_test: tests/latency_test.cpp $(SRCDIR)/latency.cpp \
+                        $(SRCDIR)/platform_linux.cpp | $(OBJDIR)
 	$(CXX) $(CXXSTD) $(WARNINGS) -O1 -I$(SRCDIR) $^ -o $@ -pthread
 
 install-deps:

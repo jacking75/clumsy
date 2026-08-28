@@ -726,7 +726,59 @@ Debian에서도 `rpmbuild`(4.18.2)를 쓸 수 있어 실제로 검증했습니�
 
 ---
 
-**남은 항목: 없음.** Phase 1~4 및 후속 정리 작업이 모두 완료·검증되었습니다.
+## Phase 5 — 기능 확장 (docs/ROADMAP-v2.md) — 완료 (2026-08-28)
+
+Phase 1~4로 기반이 정리된 뒤, "네트워크 상태 시뮬레이터로서 QA 가치를 더 높이려면
+무엇을 넣어야 하나"를 8개 항목으로 정리해 전부 구현했습니다.
+설계 근거와 검증 결과는 [docs/ROADMAP-v2.md](docs/ROADMAP-v2.md)에 있습니다.
+
+- [x] 5.1 Prometheus `/metrics` — 카운터·게이지 + 지연 히스토그램(네이티브 형식)
+- [x] 5.2 `corrupt` 모듈 — 비트 에러 주입 (MODULE_CNT 11 → 12)
+- [x] 5.3 jitter 지연 분포 — uniform / normal / pareto, `ParamSpec`에 `enum` 타입 추가
+- [x] 5.4 웹 시나리오 에디터 — 파일 없이 브라우저에서 작성·실행
+- [x] 5.5 프로파일 삭제 + `POST /api/apply` 인라인 적용
+- [x] 5.6 대시보드 — 테마 토글(Auto/Light/Dark), 모듈별 처리량 스파크라인
+- [x] 5.7 pcap 재생 — 저장한 캡처를 타이밍 유지한 채 재주입
+- [x] 5.8 지연 히스토그램 — p50/p95/p99, 리포트 막대그래프
+- [x] 5.9 테스트 자동화 3종 신규 (아래)
+
+**검증 결과**
+
+| 항목 | 결과 |
+|------|------|
+| Windows 빌드 (Rebuild, Release x64) | 경고 0, 오류 0 |
+| Linux 빌드 (`make`, g++-16 `-Wall -Wextra`) | 경고 0 |
+| `make test` (단위) | 51 assert 통과 |
+| `tests/linux/api_test.sh` | 57/57 |
+| `tests/windows/api_test.ps1` | 55/55 |
+| `sudo tests/linux/behaviour_test.sh` | 24/24 |
+
+실패킷으로 확인한 것: corrupt가 체크섬 재계산 시 20/20을 손상된 채 전달하고
+끄면 커널이 0/20으로 폐기, lag 300ms의 실측 지연과 히스토그램 p50 일치,
+세 분포의 중앙값 순서(pareto 161 < normal 217 < uniform 270ms),
+pcap 25패킷의 캡처→재생→수신 왕복.
+
+**구현 중 발견해 고친 결함 4건**
+
+| 결함 | 발견 경로 |
+|------|----------|
+| 지연 p95가 실제보다 87ms 과대 (구간 상한을 그대로 써서) | `latency_test.cpp` 신규 작성 |
+| 스파크라인이 영구히 비어 있음 (`dtMs`를 `lastStamp` 갱신 뒤 계산) | 브라우저 픽셀 검사 |
+| 다크 모드 헤더 링크가 거의 안 보임 (기본 `:visited` 색) | 스크린샷 확대 |
+| 라이트 모드 링크 대비 4.4:1로 WCAG AA 미달 | 대비율 계산 |
+
+**신규 파일**: `src/corrupt.cpp`, `src/latency.cpp`, `src/pcapreplay.cpp`,
+`tests/latency_test.cpp`, `tests/windows/api_test.ps1`,
+`tests/linux/api_test.sh`, `tests/linux/behaviour_test.sh`
+
+**남은 항목**: Windows 관리자 권한에서의 pcap 재생 실트래픽 검증.
+이 환경의 백신(Symantec + CrowdStrike)이 빌드 직후 `clumsy.exe`를 격리해
+장시간 실행이 불가능했습니다. 제어 평면은 55/55로 검증했고, Linux 쪽에서는
+왕복까지 확인했습니다.
+
+---
+
+**Phase 1~5가 모두 완료·검증되었습니다.**
 
 ---
 

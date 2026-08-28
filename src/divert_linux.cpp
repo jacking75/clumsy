@@ -144,6 +144,99 @@ void packetBackendPrepareClone(const PacketNode *src, PacketNode *dst) {
     m->synthetic = 1;   // no queue id of its own; goes out on the raw socket
 }
 
+// --- replay injection (T7) ---
+//
+// pcap replay needs to send packets when no capture is running, so it cannot
+// borrow the capture sockets: those only exist between divertStart() and
+// divertStop(). It gets its own pair with the same fwmark, opened lazily on
+// the replay thread. pcapReplayStop() joins that thread before calling the
+// close below, so this needs no lock.
+static int replaySocket  = -1;
+static int replaySocket6 = -1;
+
+static int ensureReplaySockets(void) {
+    const int one = 1;
+    const int sndbuf = 4 * 1024 * 1024;
+    UINT32 mark;
+
+    if (replaySocket >= 0 || replaySocket6 >= 0) return 1;
+
+    mark = (UINT32)argGetInt("inject-mark", DEFAULT_INJECT_MARK);
+
+    replaySocket = socket(AF_INET, SOCK_RAW | SOCK_NONBLOCK, IPPROTO_RAW);
+    if (replaySocket >= 0) {
+        setsockopt(replaySocket, IPPROTO_IP, IP_HDRINCL, &one, sizeof(one));
+        setsockopt(replaySocket, SOL_SOCKET, SO_SNDBUF, &sndbuf, sizeof(sndbuf));
+        // Same reasoning as the capture injection socket: without the mark, a
+        // replayed packet walks straight back into the operator's NFQUEUE rule.
+        setsockopt(replaySocket, SOL_SOCKET, SO_MARK, &mark, sizeof(mark));
+    }
+
+    replaySocket6 = socket(AF_INET6, SOCK_RAW | SOCK_NONBLOCK, IPPROTO_RAW);
+    if (replaySocket6 >= 0) {
+        setsockopt(replaySocket6, SOL_SOCKET, SO_SNDBUF, &sndbuf, sizeof(sndbuf));
+        setsockopt(replaySocket6, SOL_SOCKET, SO_MARK, &mark, sizeof(mark));
+    }
+
+    if (replaySocket < 0 && replaySocket6 < 0) {
+        INFO("replay: cannot open a raw socket (%s). CAP_NET_RAW is required.",
+             strerror(errno));
+        return 0;
+    }
+    return 1;
+}
+
+int packetBackendInject(char *packet, UINT len, BOOL outbound) {
+    ssize_t sent;
+
+    if (!packet || len < sizeof(struct iphdr)) return 0;
+
+    if (!outbound) {
+        // Same limit duplicate.cpp lives with: a raw socket can only originate
+        // traffic. Delivering into the local receive path would need a TUN
+        // device or an ifb redirect, which is out of scope.
+        LOG("replay: inbound injection is not supported on Linux");
+        return 0;
+    }
+    if (!ensureReplaySockets()) return 0;
+
+    if ((((unsigned char)packet[0]) >> 4) == 6) {
+        const struct ip6_hdr *ip6 = (const struct ip6_hdr*)packet;
+        struct sockaddr_in6 dst6;
+
+        if (replaySocket6 < 0 || len <= sizeof(struct ip6_hdr)) return 0;
+        memset(&dst6, 0, sizeof(dst6));
+        dst6.sin6_family = AF_INET6;
+        dst6.sin6_addr   = ip6->ip6_dst;
+        // No IP_HDRINCL for IPv6: hand the kernel the payload and let it
+        // rebuild the header from the destination.
+        sent = sendto(replaySocket6, packet + sizeof(struct ip6_hdr),
+                      len - sizeof(struct ip6_hdr), MSG_DONTWAIT,
+                      (struct sockaddr*)&dst6, sizeof(dst6));
+    } else {
+        const struct iphdr *ip = (const struct iphdr*)packet;
+        struct sockaddr_in dst;
+
+        if (replaySocket < 0) return 0;
+        memset(&dst, 0, sizeof(dst));
+        dst.sin_family      = AF_INET;
+        dst.sin_addr.s_addr = ip->daddr;
+        sent = sendto(replaySocket, packet, len, MSG_DONTWAIT,
+                      (struct sockaddr*)&dst, sizeof(dst));
+    }
+
+    if (sent < 0) {
+        LOG("replay: sendto failed (%s)", strerror(errno));
+        return 0;
+    }
+    return 1;
+}
+
+void packetBackendInjectClose(void) {
+    if (replaySocket  >= 0) { close(replaySocket);  replaySocket  = -1; }
+    if (replaySocket6 >= 0) { close(replaySocket6); replaySocket6 = -1; }
+}
+
 // ---------------------------------------------------------------------------
 // Raw socket injection, used for synthetic packets only
 // ---------------------------------------------------------------------------
@@ -671,6 +764,9 @@ void statsReset(void) {
     int ix;
     InterlockedExchange(&statsCapturedTotal, 0);
     InterlockedExchange(&statsSentTotal, 0);
+    // The delay histogram belongs to the session too; carrying it across a
+    // restart would blend two different module configurations into one curve.
+    latencyReset();
     for (ix = 0; ix < MODULE_CNT; ++ix) {
         InterlockedExchange(&(modules[ix]->affectedCount), 0);
     }

@@ -201,10 +201,12 @@ udp and not loopback and ip.DstAddr == 198.51.100.1
 
 ---
 
-## 6. duplicate 모듈과 fwmark (중요)
+## 6. 패킷 주입과 fwmark (중요)
 
-리눅스에서 복제 패킷은 **raw 소켓으로 재주입**됩니다. 그런데 재주입된 패킷은 OUTPUT 체인을
-다시 통과하므로, 아무 조치가 없으면 **자기가 만든 복제본이 다시 큐에 들어가 무한 증폭**됩니다.
+리눅스에서 **clumsy가 스스로 만들어 내보내는 패킷**은 raw 소켓으로 주입됩니다.
+duplicate 모듈의 복제본과 pcap 재생(`--replay-in`)이 여기에 해당합니다.
+그런데 주입된 패킷은 OUTPUT 체인을 다시 통과하므로, 아무 조치가 없으면
+**자기가 만든 패킷이 다시 큐에 들어가 무한 증폭**됩니다.
 (실측: 10개 전송 → 246,106개 수신)
 
 그래서 clumsy는 주입 소켓에 fwmark(기본 `0xC1`)를 찍습니다. 이 마크를 NFQUEUE 규칙보다
@@ -218,6 +220,10 @@ sudo iptables -I OUTPUT -m mark --mark 0xC1 -j ACCEPT
 
 안전장치로, 초당 5000패킷을 넘겨 주입되면 clumsy가 **주입을 자동 중단하고** 누락된 규칙을
 알려줍니다. 규칙을 깜빡해도 패킷 폭풍 대신 명확한 진단 메시지가 나옵니다.
+
+pcap 재생은 캡처와 독립적으로 동작해야 하므로 **자체 raw 소켓 쌍**을 따로 엽니다
+(캡처용 소켓은 `divertStart()`~`divertStop()` 동안만 존재하기 때문입니다).
+같은 fwmark를 사용하므로 위 규칙 하나로 둘 다 커버됩니다.
 
 ### duplicate 모듈의 리눅스 제약
 
@@ -234,6 +240,26 @@ ifb 리다이렉트 같은 전혀 다른 장치가 필요합니다. Windows의 W
 
 원본 패킷 자체는 어느 경우에도 정상 처리됩니다. 복제본만 생성되지 않습니다.
 
+### pcap 재생의 리눅스 제약
+
+| 상황 | 동작 |
+|------|------|
+| outbound IPv4 / IPv6 재생 | 정상 동작 |
+| inbound 재생 | **불가** — 시작 시 거부 |
+| 필요 권한 | `CAP_NET_RAW` (`CAP_NET_ADMIN`과 함께 부여됨) |
+
+이유는 duplicate와 동일합니다. 실측으로는 캡처한 25패킷을 그대로 재생해
+25패킷이 수신 측에 도달하는 것을 확인했습니다(`tests/linux/behaviour_test.sh`).
+
+```bash
+# 캡처 → 재생 왕복
+sudo ./clumsy --filter "udp and outbound" --pcap-out cap.pcap --timeout 30
+sudo ./clumsy --replay-in cap.pcap --replay-speed 2.0
+```
+
+> **기록된 주소로 실제 패킷이 나갑니다.** 다른 네트워크에서 뜬 캡처를 재생하면
+> 그 주소로 트래픽이 발생합니다. 의미가 통하는 환경에서만 재생하세요.
+
 ---
 
 ## 7. Windows와 다른 점 요약
@@ -248,7 +274,10 @@ ifb 리다이렉트 같은 전혀 다른 장치가 필요합니다. Windows의 W
 | 웹 대시보드 / REST / SSE | 지원 | 지원 (동일) |
 | `--process` 필터 | TCP/UDP 포트 테이블 | `/proc/<pid>/fd` + `/proc/net/*` |
 | duplicate 모듈 | 제약 없음 | outbound만 (IPv4/IPv6), 6절 참고 |
+| pcap 재생 | send-only WinDivert 핸들, Impostor 플래그 | fwmark raw 소켓, outbound만 |
 | pcap / 리포트 / 시나리오 / 프로파일 | 지원 | 지원 (동일) |
+| `/metrics` (Prometheus) | 지원 | 지원 (동일) |
+| 지연 히스토그램 p50/p95/p99 | 지원 | 지원 (동일) |
 
 ### 제어 소켓 (Named Pipe 대응)
 

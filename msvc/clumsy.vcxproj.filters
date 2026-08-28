@@ -68,6 +68,9 @@
     <ClCompile Include="$(ProjectRoot)src\tamper.cpp">
       <Filter>Source Files\Modules</Filter>
     </ClCompile>
+    <ClCompile Include="$(ProjectRoot)src\corrupt.cpp">
+      <Filter>Source Files\Modules</Filter>
+    </ClCompile>
     <ClCompile Include="$(ProjectRoot)src\reset.cpp">
       <Filter>Source Files\Modules</Filter>
     </ClCompile>
@@ -102,6 +105,12 @@
       <Filter>Source Files\Infrastructure</Filter>
     </ClCompile>
     <ClCompile Include="$(ProjectRoot)src\report.cpp">
+      <Filter>Source Files\Infrastructure</Filter>
+    </ClCompile>
+    <ClCompile Include="$(ProjectRoot)src\latency.cpp">
+      <Filter>Source Files\Infrastructure</Filter>
+    </ClCompile>
+    <ClCompile Include="$(ProjectRoot)src\pcapreplay.cpp">
       <Filter>Source Files\Infrastructure</Filter>
     </ClCompile>
     <ClCompile Include="$(ProjectRoot)src\plugin.cpp">

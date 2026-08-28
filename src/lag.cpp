@@ -55,7 +55,9 @@ static short lagProcess(PacketNode *head, PacketNode *tail) {
     // pick up all packets and fill in the current time
     while (bufSize < KEEP_AT_MOST && pac != head) {
         if (checkDirection(pac->meta.outbound, lagInbound, lagOutbound)) {
-            insertAfter(popNode(pac), bufHead)->timestamp = timeGetTime();
+            PacketNode *queued = insertAfter(popNode(pac), bufHead);
+            queued->timestamp   = currentTime;
+            queued->enqueueTime = currentTime;
             ++bufSize;
             InterlockedIncrement(&lagModule.affectedCount);
             pac = tail->prev;
@@ -68,6 +70,7 @@ static short lagProcess(PacketNode *head, PacketNode *tail) {
     while (!isBufEmpty()) {
         pac = bufTail->prev;
         if (currentTime > pac->timestamp + lagTime) {
+            latencyRecord(currentTime - pac->enqueueTime);
             insertAfter(popNode(bufTail->prev), head); // sending queue is already empty by now
             --bufSize;
             LOG("Send lagged packets.");
@@ -81,7 +84,9 @@ static short lagProcess(PacketNode *head, PacketNode *tail) {
     if (bufSize >= KEEP_AT_MOST) {
         int flushCnt = FLUSH_WHEN_FULL;
         while (flushCnt-- > 0) {
-            insertAfter(popNode(bufTail->prev), head);
+            PacketNode *forced = bufTail->prev;
+            latencyRecord(currentTime - forced->enqueueTime);
+            insertAfter(popNode(forced), head);
             --bufSize;
         }
     }
@@ -118,9 +123,9 @@ static int lagGetParams(ParamKV *kv, int maxKv) {
 }
 
 static const ParamSpec lagParamSpecs[] = {
-    { NAME"-inbound",  "Inbound",    "bool", 0, 0 },
-    { NAME"-outbound", "Outbound",   "bool", 0, 0 },
-    { NAME"-time",     "Delay (ms)", "int",  0, 15000 },
+    { NAME"-inbound",  "Inbound",    "bool", 0, 0,     NULL },
+    { NAME"-outbound", "Outbound",   "bool", 0, 0,     NULL },
+    { NAME"-time",     "Delay (ms)", "int",  0, 15000, NULL },
 };
 
 int lagGetBufSize(void) { return bufSize; }

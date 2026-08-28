@@ -58,7 +58,7 @@ Restart the console as Administrator.
 
 ```
 ┌───────────────────────────────────────────────────────────┐
-│ ● clumsy v0.4          [Download report] [API]            │  헤더
+│ ● clumsy v0.4       [Theme] [Download report] [API]       │  헤더
 ├───────────────────────────────────────────────────────────┤
 │ CAPTURE                                                   │
 │  필터 입력창          Preset [▼]  Process [____]          │
@@ -69,29 +69,47 @@ Restart the console as Administrator.
 │ LIVE STATISTICS                                           │
 │  [Captured] [Sent] [Packets/sec] [Elapsed] [Buffers]      │
 │  ┌── 실시간 throughput 그래프 ──┐                         │
+│  [Delay p50] [p95] [p99] [max] [Delayed packets]          │
 ├───────────────────────────────────────────────────────────┤
 │ MODULES                                                   │
-│  ☑ Lag        Inbound ☑ Outbound ☑ Delay(ms)[250]  12 affected│
+│  ☑ Lag   Inbound ☑ Outbound ☑ Delay(ms)[250] 12 affected ▁▃▅│
 │  ☐ Jitter     ...                                         │
 │  ☐ Drop       ...                                         │
-│  (11개 모듈)                                              │
+│  (12개 모듈)                                              │
 ├───────────────────────────────────────────────────────────┤
 │ PROFILES, SCENARIO AND CAPTURE FILE                       │
-│  Profile [▼] [Apply]   Save as [____] [Save]              │
+│  Profile [▼] [Apply] Save as [____] [Save] [Delete]       │
 │  Scenario [________] [Load] [Start] [Stop]                │
 │  pcap     [________] [Start dump] [Stop dump]             │
+│  replay   [________] Speed[1] ☐loop [Replay] [Stop]       │
+├───────────────────────────────────────────────────────────┤
+│ SCENARIO EDITOR                                           │
+│  Step 1 [at time ▼]              [Remove]                 │
+│    Seconds[5] Repeat[0] Max[0]                            │
+│    [Lag — on/off ▼][true] [×]   [+ change]                │
+│  [+ Add step]                                             │
+│  Scenario JSON [ ...생성된 문서... ]                      │
+│  [Load into clumsy] [Load & start]                        │
 └───────────────────────────────────────────────────────────┘
 ```
 
 - **헤더의 점(●)**: 실시간 스트림(Server-Sent Events) 연결 상태. 초록이면 정상 연결입니다.
+- **Theme 버튼**: `Auto`(OS 설정 따름) → `Light` → `Dark` → `Auto` 순환. 선택은
+  `localStorage`에 저장되어 새로고침 후에도 유지됩니다. `Auto`에서만 OS의
+  다크 모드 설정을 따라갑니다.
 - **CAPTURE**: 어떤 패킷을 가로챌지 설정합니다. Preset 드롭다운은 `config.json`에서,
   Process 입력란은 실행파일 이름으로 해당 프로세스의 패킷만 대상으로 삼습니다.
 - **Filter builder**: WinDivert 필터 문법을 몰라도 조합으로 표현식을 생성합니다
   ([3.5절](#필터-빌더) 참조).
-- **LIVE STATISTICS**: 200ms 주기로 push되는 실시간 수치와 초당 패킷 그래프입니다.
+- **LIVE STATISTICS**: 200ms 주기로 push되는 실시간 수치와 초당 패킷 그래프,
+  그리고 Lag·Jitter가 실제로 지연시킨 시간의 분위수입니다.
 - **MODULES**: 각 모듈의 체크박스를 켜면 파라미터 입력 폼이 펼쳐집니다.
   이 폼은 서버가 내려주는 `ParamSpec` 메타데이터로 **자동 생성**되므로,
   새 모듈이 추가되어도 대시보드는 그대로 동작합니다.
+  켜져 있는 모듈에는 **초당 처리량 스파크라인**이 함께 표시됩니다. 누적 카운터가
+  아니라 변화율을 그리므로, 모듈이 언제 일했는지가 보입니다.
+- **SCENARIO EDITOR**: 시나리오를 파일 없이 브라우저에서 만들고 바로 실행합니다
+  ([8절](#8-시나리오-스크립팅) 참조).
 - **오프라인 동작**: 대시보드는 CDN이나 외부 프레임워크를 전혀 사용하지 않는
   단일 HTML 파일(`web/index.html`)입니다. 인터넷이 없는 테스트망에서도 그대로 동작합니다.
 
@@ -238,6 +256,7 @@ Start를 누른 후, Functions 영역에서 원하는 기능의 체크박스를 
 |------|------|--------|------|
 | Min(ms) | 최소 지연 | 20ms | 0 ~ 5000ms |
 | Max(ms) | 최대 지연 | 100ms | 0 ~ 5000ms |
+| Distribution | 지연 분포 모양 | uniform | uniform / normal / pareto |
 
 **동작 방식**: 각 패킷에 `[Min, Max]` 범위의 랜덤 지연을 부여합니다. 지연이 다르므로 패킷 도착 순서가 바뀔 수 있습니다(자연스러운 순서 뒤섞임 발생).
 
@@ -247,6 +266,40 @@ Start를 누른 후, Functions 영역에서 원하는 기능의 체크박스를 
 예시: Min=20, Max=150 → 어떤 패킷은 20ms, 어떤 패킷은 150ms 지연
      → 패킷 도착 순서가 섞일 수 있음
 ```
+
+#### 분포 선택 (Distribution)
+
+현실의 네트워크 지연은 균등하지 않습니다. 정상적인 회선은 평균 근처에 몰리고,
+혼잡한 회선은 대부분 멀쩡하다가 가끔 크게 튑니다. 두 모양 모두 버그 재현에
+필요하기 때문에, Linux `tc netem`이 제공하는 것과 같은 세 가지 분포를 지원합니다.
+
+| 값 | 모양 | 어떤 상황을 재현하나 |
+|----|------|---------------------|
+| `uniform` (기본) | `[Min, Max]` 전 구간이 고르게 | 특별한 가정 없이 넓은 범위를 훑을 때 |
+| `normal` | 중앙값 근처에 집중, 양끝은 드묾 | 안정적인 회선의 자연스러운 흔들림 |
+| `pareto` | 대부분 Min 근처, 가끔 큰 스파이크 | 혼잡·버퍼블로트처럼 롱테일이 문제인 경우 |
+
+`normal`은 `(Min+Max)/2`를 평균, `범위/6`을 표준편차로 삼아 약 99.7%가 범위 안에
+들어오게 하고, 벗어난 표본은 범위 끝으로 잘라냅니다(재추첨하지 않는 이유는
+최악 시간이 정해지지 않기 때문입니다). `pareto`는 shape=2로 중앙값이
+`Min + 0.29×범위` 부근에 오고 위쪽 꼬리가 남습니다.
+
+실측 예 (Min=0, Max=400, 각 60패킷):
+
+| 분포 | p50 | p95 |
+|------|-----|-----|
+| uniform | 270ms | 403ms |
+| normal | 217ms | 336ms |
+| pareto | 161ms | 327ms |
+
+```bash
+# 롱테일 지연으로 랙 보상 로직 흔들어보기
+clumsy --filter "udp and outbound" --jitter on \
+       --jitter-min 10 --jitter-max 400 --jitter-dist pareto
+```
+
+> CLI·API에서는 이름(`uniform`/`normal`/`pareto`) 대신 숫자 `0`/`1`/`2`도 받습니다.
+> 이름이 생기기 전에 작성된 프로파일·시나리오가 그대로 동작합니다.
 
 > **Lag vs Jitter**: Lag은 모든 패킷에 동일한 지연(일정한 RTT), Jitter는 패킷마다 다른 지연(불규칙한 RTT). 실제 인터넷은 두 가지가 혼재합니다.
 
@@ -412,6 +465,50 @@ Start를 누른 후, Functions 영역에서 원하는 기능의 체크박스를 
 
 ---
 
+### Corrupt — 비트 에러 (무선 손상)
+
+페이로드의 각 비트를 아주 낮은 확률로 독립적으로 뒤집습니다.
+
+| 항목 | 설명 | 기본값 | 범위 |
+|------|------|--------|------|
+| Chance(%) | 이 패킷을 손상시킬 확률 | 10% | 0 ~ 100% |
+| Bit error (ppm) | **비트당** 뒤집힘 확률(백만분율) | 100 | 0 ~ 1,000,000 |
+| Redo checksum | 손상 후 체크섬 재계산 | 켬 | 켬/끔 |
+| Inbound / Outbound | 적용 방향 | 둘 다 | — |
+
+**Tamper와 무엇이 다른가**: Tamper는 페이로드의 한 구간을 XOR 패턴으로 통째로
+바꿉니다 — 의도적인 중간자 변조에 가깝습니다. Corrupt는 무선 링크(Wi-Fi, 셀룰러,
+위성)에서 실제로 일어나는 **낮은 비율의 산발적 비트 반전**을 재현합니다.
+같은 "데이터가 깨진다"라도 애플리케이션이 겪는 양상이 다릅니다.
+
+**ppm 감 잡기**: 100ppm은 0.01%로, 대략 1250바이트마다 1비트가 뒤집힙니다.
+1400바이트 패킷 하나에 평균 1.1비트입니다. 20000ppm(2%)이면 패킷당 약 224비트가
+뒤집혀 페이로드가 알아볼 수 없게 됩니다.
+
+**Redo checksum이 결정적입니다**:
+
+| 설정 | 결과 | 무엇을 테스트하나 |
+|------|------|------------------|
+| 켬 | 손상된 데이터가 **애플리케이션까지 도달** | 앱의 데이터 검증·파싱 오류 처리 |
+| 끔 | 커널이 체크섬 오류로 **폐기** | 링크 계층 CRC 실패와 동일한 손실 |
+
+실측으로 확인된 동작입니다 — checksum 켬: 20/20 도착(전부 손상), 끔: 0/20 도착.
+
+**언제 사용**: 모바일·무선 환경에서 앱이 부분 손상 데이터를 만났을 때의 동작 확인.
+게임 프로토콜의 체크섬/직렬화 검증 로직 테스트.
+
+```bash
+# 무선 환경 흉내: 절반의 패킷에 0.5% 비트 에러
+clumsy --filter "udp and outbound" --corrupt on \
+       --corrupt-chance 50 --corrupt-ber 5000
+```
+
+> **구현 메모**: 비트마다 난수를 뽑으면 1400바이트 패킷 하나에 11,200번을 호출해야
+> 해서 패킷 처리 경로가 막힙니다. 대신 다음 에러까지의 간격을 기하분포에서 직접
+> 뽑아, 실제로 뒤집는 비트 수만큼만 난수를 씁니다(기본값에서 패킷당 2~3회).
+
+---
+
 ### Set TCP RST — TCP 연결 강제 종료
 
 TCP 패킷에 RST 플래그를 설정해서 연결을 강제로 끊습니다.
@@ -484,9 +581,32 @@ TCP 패킷에 RST 플래그를 설정해서 연결을 강제로 끊습니다.
 | `Packets / sec` | 초당 캡처 속도 |
 | `Elapsed` | 캡처 경과 시간 |
 | `Buffers` | Lag / Jitter / Bandwidth 모듈의 현재 내부 버퍼 크기 |
+| `Delay p50 / p95 / p99` | Lag·Jitter가 실제로 지연시킨 시간의 분위수 |
+| `Delay max` | 관측된 최대 지연 |
+| `Delayed packets` | 지연 히스토그램에 기록된 패킷 수 |
 
 그 아래 그래프는 최근 180개 샘플의 초당 패킷 수를 그립니다(Canvas API 직접 렌더링).
-각 모듈 행 오른쪽에는 해당 모듈이 처리한 누적 패킷 수가 표시됩니다.
+각 모듈 행 오른쪽에는 해당 모듈이 처리한 누적 패킷 수와, 켜져 있는 모듈에는
+초당 처리량 스파크라인이 함께 표시됩니다.
+
+#### 지연 분위수 (p50 / p95 / p99)
+
+평균만 보면 **가끔 크게 튀는 패킷**을 놓칩니다. p50=40ms · p99=900ms인 세션과
+계속 60ms인 세션은 평균이 비슷해도 완전히 다른 버그 리포트입니다.
+
+수치는 Lag과 Jitter가 각 패킷을 버퍼에 넣고 뺄 때까지의 **실측 시간**에서 나옵니다.
+샘플을 전부 보관하지 않고 13개 구간의 히스토그램에 누적하므로, 세션이 길어져도
+메모리와 비용이 늘지 않습니다(패킷당 카운터 증가 1회).
+
+구간 상한(ms): `1, 2, 5, 10, 25, 50, 100, 250, 500, 1000, 2500, 5000, 그 이상`
+
+> 분위수는 구간 안에서 선형 보간한 **근사치**입니다(Prometheus
+> `histogram_quantile()`과 같은 방식). 다만 최소·최대값은 정확히 기록하므로
+> 양 끝 구간은 실제 관측 범위로 좁혀서 계산합니다 — 이 보정이 없으면
+> 0~400ms 구간의 p95가 467ms처럼 실제보다 크게 나옵니다.
+
+전체 분포는 세션 리포트(`Download report`)의 **Delay distribution** 막대그래프에서
+확인할 수 있습니다. 모듈을 켜지 않은 세션에서는 이 항목이 비어 있습니다.
 
 ### 모듈별 카운터 의미
 
@@ -496,6 +616,7 @@ TCP 패킷에 RST 플래그를 설정해서 연결을 강제로 끊습니다.
 - **Duplicate**: 생성된 복제 패킷 수 (원본 제외)
 - **Out of Order**: 재정렬 버퍼에 들어간 패킷 수
 - **Tamper**: 변조된 패킷 수
+- **Corrupt**: 비트가 하나라도 뒤집힌 패킷 수
 - **Set TCP RST**: RST 주입된 패킷 수
 - **Bandwidth**: 대역폭 큐에 들어간 패킷 수
 
@@ -580,6 +701,7 @@ clumsy.exe --filter "필터식" --모듈명 on [--모듈명-옵션 값] ...
 --jitter-max <ms>      최대 지연 (기본: 100)
 --jitter-inbound on/off
 --jitter-outbound on/off
+--jitter-dist uniform|normal|pareto   지연 분포 (기본: uniform)
 
 --drop on/off
 --drop-chance <%>      드롭 확률 (기본: 10.0)
@@ -619,6 +741,13 @@ clumsy.exe --filter "필터식" --모듈명 on [--모듈명-옵션 값] ...
 --ood-inbound on/off
 --ood-outbound on/off
 
+--corrupt on/off
+--corrupt-chance <%>      이 패킷을 손상시킬 확률 (기본: 10)
+--corrupt-ber <ppm>       비트당 반전 확률, 백만분율 (기본: 100 = 0.01%)
+--corrupt-checksum on/off 손상 후 체크섬 재계산 (기본: on)
+--corrupt-inbound on/off
+--corrupt-outbound on/off
+
 --tamper on/off
 --tamper-chance <%>
 --tamper-position <1~4>   변조 위치: 1=Front, 2=Center(기본), 3=Back, 4=Random
@@ -644,6 +773,10 @@ clumsy.exe --filter "필터식" --모듈명 on [--모듈명-옵션 값] ...
 --pcap-stage pre|post|both 모듈 적용 전/후 중 어느 시점을 기록할지 (기본: post)
 --pcap-max-packets <n>     덤프 패킷 수 상한 (0=무제한)
 --pcap-max-bytes <n>       덤프 바이트 수 상한 (0=무제한)
+
+--replay-in <파일>     저장된 libpcap 파일을 다시 주입 (캡처와 독립적으로 동작)
+--replay-speed <배수>  재생 속도 배율 (기본: 1.0)
+--replay-loop on       파일 끝에 도달하면 처음부터 다시 재생
 
 --report-out <파일>    캡처 종료 시 HTML 세션 리포트 생성
 --enable-plugins <dir> 커스텀 모듈 DLL 로드 (기본 비활성, 보안 주의)
@@ -801,6 +934,7 @@ clumsy는 두 가지 제어 트랜스포트를 동시에 제공합니다.
 | 메서드 / 경로 | 인증 | 설명 |
 |---|---|---|
 | `GET /api/health` | 불필요 | 생존 확인. CI 헬스체크용 |
+| `GET /metrics` | 불필요 | Prometheus 텍스트 노출 형식 (아래 참조) |
 | `GET /api/status` | 필요 | 캡처 상태, 필터, 프로세스, 마지막 메시지 |
 | `GET /api/modules` | 필요 | 모듈 전체 상태 + 현재 파라미터 + ParamSpec 폼 메타데이터 |
 | `GET /api/stats` | 필요 | 실시간 통계 (SSE와 동일 페이로드) |
@@ -816,9 +950,13 @@ clumsy는 두 가지 제어 트랜스포트를 동시에 제공합니다.
 | `POST /api/profiles` | 필요 | 현재 상태를 프로파일로 저장 |
 | `POST /api/profiles/{name}/apply` | 필요 | 프로파일 적용 |
 | `POST /api/presets` | 필요 | 필터 프리셋 저장 (config.json에 기록) |
+| `POST /api/profiles/{name}/delete` | 필요 | 프로파일 삭제 (`profiles.json`에서 제거) |
+| `POST /api/apply` | 필요 | 여러 모듈을 저장 없이 한 번에 설정 |
 | `POST /api/scenario/load` | 필요 | 시나리오 파일 로드 |
+| `POST /api/scenario/loadinline` | 필요 | 요청 본문의 시나리오를 파일 없이 로드 |
 | `POST /api/scenario/start` \| `stop` | 필요 | 시나리오 재생 제어 |
 | `POST /api/pcap/start` \| `stop` | 필요 | pcap 덤프 제어 |
+| `POST /api/replay/start` \| `stop` | 필요 | pcap 재생 제어 |
 
 #### 사용 예 (curl)
 
@@ -845,6 +983,66 @@ curl -f http://10.0.0.5:8080/api/health || echo "clumsy is down"
 # 캡처 중지 후 리포트 수집
 curl -X POST http://127.0.0.1:8080/api/stop
 curl -o report.html http://127.0.0.1:8080/api/report
+
+# 프로파일을 만들지 않고 여러 모듈을 한 번에 설정
+curl -X POST http://127.0.0.1:8080/api/apply \
+     -H "Content-Type: application/json" \
+     -d "{\"lag\":true,\"lag-time\":200,\"drop\":true,\"drop-chance\":5.0}"
+
+# 저장한 pcap을 2배속으로 다시 주입
+curl -X POST http://127.0.0.1:8080/api/replay/start \
+     -H "Content-Type: application/json" \
+     -d "{\"path\":\"capture.pcap\",\"speed\":2.0}"
+
+# Prometheus 스크레이프 (인증 불필요)
+curl http://127.0.0.1:8080/metrics
+```
+
+#### Prometheus 연동
+
+`GET /metrics`는 Prometheus 텍스트 노출 형식(v0.0.4)을 반환합니다.
+**인증이 필요 없습니다** — 읽기 전용 카운터이고, 모든 스크레이프 설정이
+별도 절차 없이 접근할 것을 전제하기 때문입니다. 외부 바인딩 환경에서
+토큰을 강제하려면 `httpserver.cpp`의 해당 블록을 `isAuthorized()` 검사
+아래로 옮기면 됩니다.
+
+```yaml
+# prometheus.yml
+scrape_configs:
+  - job_name: clumsy
+    static_configs:
+      - targets: ['10.0.0.5:8080', '10.0.0.6:8080']
+    metrics_path: /metrics
+```
+
+노출되는 시계열:
+
+| 메트릭 | 타입 | 의미 |
+|--------|------|------|
+| `clumsy_up` | gauge | 항상 1 (스크레이프 성공) |
+| `clumsy_capturing` | gauge | 캡처 중이면 1 |
+| `clumsy_captured_packets_total` | counter | 캡처한 패킷 수 |
+| `clumsy_sent_packets_total` | counter | 재주입한 패킷 수 |
+| `clumsy_capture_elapsed_seconds` | gauge | 캡처 경과 시간 |
+| `clumsy_lag_buffer_packets` 등 | gauge | 모듈별 내부 버퍼 크기 |
+| `clumsy_pcap_written_packets_total` | counter | pcap에 기록한 패킷 수 |
+| `clumsy_replay_injected_packets_total` | counter | 재생으로 주입한 패킷 수 |
+| `clumsy_module_enabled{module="..."}` | gauge | 모듈 on/off |
+| `clumsy_module_affected_packets_total{module="..."}` | counter | 모듈이 처리한 패킷 수 |
+| `clumsy_latency_ms` | histogram | 지연 분포 (`_bucket`/`_sum`/`_count`) |
+
+모듈 이름을 메트릭 이름이 아니라 **레이블**로 넣었기 때문에 Grafana 패널
+하나로 모든 모듈을 다룰 수 있습니다.
+
+```promql
+# 모듈별 초당 처리량
+rate(clumsy_module_affected_packets_total[1m])
+
+# 지연 p95 (히스토그램에서 직접)
+histogram_quantile(0.95, rate(clumsy_latency_ms_bucket[5m]))
+
+# 여러 테스트 머신 중 캡처가 멈춘 것 찾기
+clumsy_capturing == 0
 ```
 
 #### 실시간 스트림 구독 (Python)
@@ -878,9 +1076,18 @@ with requests.get("http://127.0.0.1:8080/api/stream", stream=True) as r:
 }
 ```
 
-`type`은 `int` / `float` / `percent` / `bool` / `action` 중 하나입니다.
+`type`은 `int` / `float` / `percent` / `bool` / `action` / `enum` 중 하나입니다.
 `action`은 값이 없는 일회성 트리거로, 대시보드는 버튼으로 렌더링합니다
 (예: `blackout-trigger`, `reset-next`).
+
+`enum`은 정해진 이름 중 하나를 고르는 값으로, 선택지가 `options` 배열에 함께
+내려옵니다. 대시보드는 이를 드롭다운으로 그립니다 — 즉 모듈 이름을 전혀 모르는
+채로 폼이 만들어집니다.
+
+```json
+{ "key": "jitter-dist", "label": "Distribution", "type": "enum",
+  "min": 0, "max": 0, "options": ["uniform", "normal", "pareto"] }
+```
 
 ---
 
@@ -1081,6 +1288,30 @@ clumsy.exe --filter "udp and outbound" --scenario scenario.json
 
 필터링이 시작되면 시나리오가 자동으로 재생됩니다. 모든 스텝이 실행되면 재생이 완료되고 마지막 설정 상태가 유지됩니다.
 
+#### 웹 대시보드의 시나리오 에디터
+
+파일을 직접 쓰지 않고 브라우저에서 스텝을 구성해 바로 실행할 수 있습니다.
+대시보드 하단 **SCENARIO EDITOR** 영역에서:
+
+1. `+ Add step`으로 스텝 추가
+2. 트리거를 `at time`(시간) 또는 `when metric`(조건) 중에서 선택
+3. `+ change`로 바꿀 항목 추가 — 드롭다운에는 **모든 모듈의 on/off와 파라미터**가
+   나옵니다. 목록은 `GET /api/modules`의 ParamSpec에서 만들어지므로 모듈이
+   늘어나면 자동으로 반영됩니다
+4. `Load into clumsy` 또는 `Load & start`
+
+아래 **Scenario JSON** 상자에는 전송될 문서가 그대로 보입니다. 직접 편집하거나
+기존 시나리오를 붙여넣어도 되고, 파일로 저장해 `--scenario`에 쓸 수도 있습니다.
+(빌더는 스텝을 바꿀 때만 이 상자를 덮어씁니다.)
+
+REST로는 `POST /api/scenario/loadinline`에 문서를 문자열로 담아 보냅니다:
+
+```bash
+curl -X POST http://127.0.0.1:8080/api/scenario/loadinline \
+     -H "Content-Type: application/json" \
+     -d '{"scenario":"[{\"at\":5,\"lag\":true,\"lag-time\":250}]"}'
+```
+
 ### 파일 형식
 
 ```json
@@ -1094,7 +1325,7 @@ clumsy.exe --filter "udp and outbound" --scenario scenario.json
 - `"모듈명": true/false`: 해당 모듈 활성화/비활성화 (모듈 shortName 사용)
 - `"파라미터키": 값`: 모듈 파라미터 변경 (제어 API와 동일한 키 이름)
 
-모듈 shortName 목록: `lag`, `jitter`, `drop`, `burstloss`, `blackout`, `throttle`, `ood`, `duplicate`, `tamper`, `reset`, `bandwidth`
+모듈 shortName 목록: `lag`, `jitter`, `drop`, `burstloss`, `blackout`, `throttle`, `ood`, `duplicate`, `tamper`, `corrupt`, `reset`, `bandwidth`
 
 ### 트리거 종류 (0.4에서 확장)
 
@@ -1339,6 +1570,61 @@ clumsy.exe --filter "udp" --pcap-out capture.pcap ^
 - Wireshark에서 열면 자동으로 인식됩니다. 이더넷 헤더가 없다고 나오는 것이 정상입니다.
 - 스냅 길이는 65535바이트입니다.
 
+### pcap 재생 (replay)
+
+저장한 pcap을 **다시 주입**할 수 있습니다. 특정 트래픽 순서에서만 재현되는
+버그를 이야기가 아니라 반복 가능한 테스트로 만들 때 씁니다.
+
+```bash
+# 원래 타이밍 그대로 재생
+clumsy.exe --replay-in capture.pcap
+
+# 2배속으로, 파일 끝에서 반복
+clumsy.exe --replay-in capture.pcap --replay-speed 2.0 --replay-loop on
+```
+
+REST: `POST /api/replay/start` `{"path":"capture.pcap","speed":1.0,"loop":false}`,
+`POST /api/replay/stop`. 진행 상황은 `GET /api/stats`의 `replay` 항목
+(`read` / `sent` / `failed`)에 나옵니다.
+
+**동작 방식**
+
+- 파일은 **스트리밍으로 읽습니다**. 수백 MB짜리 캡처도 메모리에 한 패킷만 올립니다.
+- 레코드의 타임스탬프 간격을 지켜 재생하되, 패킷 사이에 고정 시간을 자는 대신
+  **원본 타임라인 기준으로 맞춥니다**. 그렇지 않으면 주입 비용이 누적되어
+  점점 원본보다 느려집니다.
+- 재생은 캡처와 **독립적**입니다. 필터를 설정하지 않아도 동작합니다.
+
+**지원 링크 타입**
+
+| 값 | 형식 | 처리 |
+|----|------|------|
+| 101 | `LINKTYPE_RAW` | clumsy가 직접 쓰는 형식. 그대로 주입 |
+| 1 | `LINKTYPE_ETHERNET` | 14바이트 이더넷 헤더를 제거 후 주입 (tcpdump/Wireshark 기본) |
+| 228 / 229 | IPv4 / IPv6 | 그대로 주입 |
+
+이더넷 파일에서 IP가 아닌 프레임(ARP, VLAN 태그 등)은 주입하지 않고 `failed`로
+집계합니다. **pcapng는 지원하지 않습니다** — Wireshark에서 저장할 때
+"Wireshark/tcpdump/... - pcap"을 선택하세요. 잘못된 파일은 재생을 시작하기 전에
+매직 넘버 단계에서 거부되고 이유가 응답에 담깁니다.
+
+**플랫폼별 제약**
+
+| | Windows | Linux |
+|---|---------|-------|
+| 주입 경로 | 전용 send-only WinDivert 핸들 | fwmark를 단 raw 소켓 |
+| 권한 | 관리자 | `CAP_NET_RAW` |
+| 방향 | outbound (Impostor 플래그로 표시) | **outbound만** |
+| 자기 재캡처 | 필터에 `not impostor`를 넣어 제외 가능 | fwmark ACCEPT 규칙으로 제외 |
+
+Linux에서 inbound 재생이 불가능한 것은 duplicate 모듈과 같은 이유입니다 —
+raw 소켓은 트래픽을 만들어 보낼 수만 있고, 로컬 수신 경로에 밀어 넣으려면
+TUN 장치나 ifb 리다이렉트가 필요합니다.
+
+> **주소는 그대로 나갑니다**: 기록된 출발지/목적지 IP가 수정 없이 사용됩니다.
+> 다른 네트워크에서 캡처한 파일을 재생하면 그 주소로 실제 패킷이 나가므로,
+> 의미가 통하는 환경에서만 재생하세요.
+
 ---
 
 ## 11. HTML 세션 리포트
@@ -1367,9 +1653,11 @@ clumsy.exe --filter "udp and outbound" --lag on --lag-time 120 ^
 | Capture | 적용된 필터 표현식(프로세스 필터 포함) |
 | 카드 | 총 캡처/전송 패킷 수, 평균 초당 패킷 |
 | Throughput | 초당 패킷 수 그래프 (인라인 SVG, 차트 라이브러리 없음) |
+| Delay distribution | 지연 히스토그램 막대그래프 + min/mean/p50/p95/p99/max 카드 |
 | Modules | 모듈별 종료 시점 활성화 여부, 처리 패킷 수, 파라미터 전체 |
 | Timeline | 세션 시작/종료 및 발동한 시나리오 스텝 기록 |
 | Packet capture | pcap을 함께 사용한 경우 파일 경로와 패킷 수 |
+| Packet replay | 재생을 사용한 경우 읽은/주입한/건너뛴 패킷 수 |
 
 시나리오를 함께 쓰면 각 스텝이 **실제로 몇 초에 발동했는지**가 타임라인에 남으므로,
 조건 트리거가 언제 걸렸는지 사후 확인할 수 있습니다.

@@ -74,7 +74,27 @@ static std::string paramSpecsJson(Module *m) {
                ",\"label\":" + quoted(s.label) +
                ",\"type\":" + quoted(s.type) +
                ",\"min\":" + dblToStr(s.minVal) +
-               ",\"max\":" + dblToStr(s.maxVal) + "}";
+               ",\"max\":" + dblToStr(s.maxVal);
+        // Enum parameters ship their choices so the dashboard can render a
+        // dropdown without knowing which module it is looking at.
+        if (s.options && s.options[0]) {
+            out += ",\"options\":[";
+            const char *p = s.options;
+            bool firstOpt = true;
+            while (*p) {
+                const char *comma = strchr(p, ',');
+                std::string one = comma ? std::string(p, comma - p) : std::string(p);
+                if (!one.empty()) {
+                    if (!firstOpt) out += ",";
+                    out += quoted(one);
+                    firstOpt = false;
+                }
+                if (!comma) break;
+                p = comma + 1;
+            }
+            out += "]";
+        }
+        out += "}";
     }
     out += "]";
     return out;
@@ -116,6 +136,19 @@ std::string apiStatsJson() {
     out += ",\"scenario\":{\"loaded\":" + std::string(scenarioIsLoaded() ? "true" : "false") +
            ",\"active\":" + std::string(scenarioIsActive() ? "true" : "false") +
            ",\"steps\":" + numToStr(scenarioStepCount()) + "}";
+    out += ",\"replay\":{\"active\":" + std::string(pcapReplayIsActive() ? "true" : "false") +
+           ",\"read\":" + numToStr(pcapReplayRead()) +
+           ",\"sent\":" + numToStr(pcapReplaySent()) +
+           ",\"failed\":" + numToStr(pcapReplayFailed()) + "}";
+    // Percentiles are read off the histogram, so this costs the same whether
+    // the session delayed ten packets or ten million.
+    out += ",\"latency\":{\"count\":" + numToStr(latencyCount()) +
+           ",\"min\":" + numToStr(latencyMin()) +
+           ",\"max\":" + numToStr(latencyMax()) +
+           ",\"mean\":" + dblToStr(latencyMean()) +
+           ",\"p50\":" + dblToStr(latencyPercentile(50)) +
+           ",\"p95\":" + dblToStr(latencyPercentile(95)) +
+           ",\"p99\":" + dblToStr(latencyPercentile(99)) + "}";
     out += ",\"modules\":{";
     for (int ix = 0; ix < MODULE_CNT; ++ix) {
         Module *m = modules[ix];
@@ -192,9 +225,96 @@ std::string apiDocsJson() {
     "{\"method\":\"POST\",\"path\":\"/api/scenario/start\",\"desc\":\"restart scenario playback\"},"
     "{\"method\":\"POST\",\"path\":\"/api/scenario/stop\",\"desc\":\"halt scenario playback\"},"
     "{\"method\":\"POST\",\"path\":\"/api/pcap/start\",\"body\":\"{\\\"path\\\":\\\"out.pcap\\\",\\\"maxPackets\\\":0,\\\"maxBytes\\\":0}\"},"
-    "{\"method\":\"POST\",\"path\":\"/api/pcap/stop\",\"desc\":\"close the pcap file\"}"
+    "{\"method\":\"POST\",\"path\":\"/api/pcap/stop\",\"desc\":\"close the pcap file\"},"
+    "{\"method\":\"GET\",\"path\":\"/metrics\",\"auth\":false,\"desc\":\"Prometheus text exposition\"},"
+    "{\"method\":\"POST\",\"path\":\"/api/apply\",\"body\":\"{\\\"lag\\\":true,\\\"lag-time\\\":200}\",\"desc\":\"set several modules at once without saving a profile\"},"
+    "{\"method\":\"POST\",\"path\":\"/api/profiles/{name}/delete\",\"desc\":\"remove a profile from profiles.json\"},"
+    "{\"method\":\"POST\",\"path\":\"/api/scenario/loadinline\",\"body\":\"{\\\"scenario\\\":\\\"[{...}]\\\"}\",\"desc\":\"load a scenario from the request body\"},"
+    "{\"method\":\"POST\",\"path\":\"/api/replay/start\",\"body\":\"{\\\"path\\\":\\\"in.pcap\\\",\\\"speed\\\":1.0,\\\"loop\\\":false}\"},"
+    "{\"method\":\"POST\",\"path\":\"/api/replay/stop\",\"desc\":\"halt pcap replay\"}"
     "]}";
     return docs;
+}
+
+// ---------------------------------------------------------------------------
+// Prometheus text exposition format v0.0.4  (T1)
+//
+// Counters and gauges only: no summaries, and the one histogram is emitted in
+// the native cumulative-bucket form so histogram_quantile() works in Grafana
+// against exactly the same numbers /api/stats reports.
+// ---------------------------------------------------------------------------
+std::string apiMetricsText() {
+    std::string o;
+
+    auto metric = [&](const char *name, const char *help, const char *type,
+                      const std::string &value) {
+        o += "# HELP clumsy_"; o += name; o += " "; o += help; o += "\n";
+        o += "# TYPE clumsy_"; o += name; o += " "; o += type; o += "\n";
+        o += "clumsy_"; o += name; o += " "; o += value; o += "\n";
+    };
+    auto boolStr = [](bool b) { return std::string(b ? "1" : "0"); };
+
+    metric("up", "always 1; the scrape succeeded", "gauge", "1");
+    metric("capturing", "1 while a capture is running", "gauge",
+           boolStr(appIsCapturing() != 0));
+    metric("captured_packets_total", "packets taken off the wire", "counter",
+           numToStr(statsCapturedTotal));
+    metric("sent_packets_total", "packets handed back to the stack", "counter",
+           numToStr(statsSentTotal));
+    metric("capture_elapsed_seconds", "seconds since the capture started", "gauge",
+           dblToStr((double)appCaptureElapsedMs() / 1000.0));
+
+    metric("lag_buffer_packets", "packets held by the lag module", "gauge",
+           numToStr(lagGetBufSize()));
+    metric("jitter_buffer_packets", "packets held by the jitter module", "gauge",
+           numToStr(jitterGetBufSize()));
+    metric("bandwidth_buffer_packets", "packets held by the bandwidth module", "gauge",
+           numToStr(bandwidthGetBufSize()));
+
+    metric("pcap_written_packets_total", "packets written to the pcap file", "counter",
+           numToStr(pcapExportCount()));
+    metric("pcap_written_bytes_total", "bytes written to the pcap file", "counter",
+           numToStr(pcapExportBytes()));
+    metric("replay_active", "1 while a pcap replay is running", "gauge",
+           boolStr(pcapReplayIsActive() != 0));
+    metric("replay_injected_packets_total", "packets re-injected from a pcap file",
+           "counter", numToStr(pcapReplaySent()));
+    metric("replay_failed_packets_total", "replay packets that could not be injected",
+           "counter", numToStr(pcapReplayFailed()));
+
+    // Per-module series. shortName is a label rather than part of the metric
+    // name, which is what lets one Grafana panel cover every module.
+    o += "# HELP clumsy_module_enabled 1 while a module is switched on\n";
+    o += "# TYPE clumsy_module_enabled gauge\n";
+    for (int ix = 0; ix < MODULE_CNT; ++ix) {
+        o += "clumsy_module_enabled{module=\"" + std::string(modules[ix]->shortName) +
+             "\"} " + (*modules[ix]->enabledFlag ? "1" : "0") + "\n";
+    }
+    o += "# HELP clumsy_module_affected_packets_total packets a module acted on\n";
+    o += "# TYPE clumsy_module_affected_packets_total counter\n";
+    for (int ix = 0; ix < MODULE_CNT; ++ix) {
+        o += "clumsy_module_affected_packets_total{module=\"" +
+             std::string(modules[ix]->shortName) + "\"} " +
+             numToStr(modules[ix]->affectedCount) + "\n";
+    }
+
+    // Native histogram: cumulative le= buckets, then _sum and _count.
+    o += "# HELP clumsy_latency_ms observed packet delay from lag and jitter\n";
+    o += "# TYPE clumsy_latency_ms histogram\n";
+    {
+        long cumulative = 0;
+        for (int i = 0; i < LATENCY_BUCKETS; ++i) {
+            cumulative += latencyBucketCount(i);
+            LONG upper = latencyBucketUpper(i);
+            std::string le = (upper != 0) ? numToStr(upper) : std::string("+Inf");
+            o += "clumsy_latency_ms_bucket{le=\"" + le + "\"} " +
+                 numToStr(cumulative) + "\n";
+        }
+        o += "clumsy_latency_ms_sum " + dblToStr(latencySumMs()) + "\n";
+        o += "clumsy_latency_ms_count " + numToStr(latencyCount()) + "\n";
+    }
+
+    return o;
 }
 
 // ---------------------------------------------------------------------------
@@ -399,6 +519,93 @@ std::string apiPcapStop(int *httpStatus) {
     return okJson("\"packets\":" + numToStr(n));
 }
 
+std::string apiDeleteProfile(const std::string &name, int *httpStatus) {
+    *httpStatus = 200;
+    if (!profileDelete(name.c_str())) {
+        *httpStatus = 404;
+        return errJson("profile not found: " + name);
+    }
+    return okJson("\"deleted\":" + quoted(name));
+}
+
+// Applies a flat {"lag":true,"lag-time":200,...} object across every module in
+// one request. The same shape a profile stores, without saving one.
+std::string apiApplyInline(const std::string &body, int *httpStatus) {
+    JsonValue req;
+    std::string unknown;
+    int applied = 0;
+
+    *httpStatus = 200;
+    if (!jsonParse(body, req) || !req.isObject()) {
+        *httpStatus = 400;
+        return errJson("malformed JSON body");
+    }
+    for (size_t i = 0; i < req.obj.size(); ++i) {
+        const std::string &key = req.obj[i].first;
+        std::string val = req.obj[i].second.asString();
+        if (applyModuleKV(key.c_str(), val.c_str())) {
+            applied++;
+        } else {
+            if (!unknown.empty()) unknown += ",";
+            unknown += key;
+        }
+    }
+    std::string extra = "\"applied\":" + numToStr(applied);
+    if (!unknown.empty()) extra += ",\"unknownKeys\":" + quoted(unknown);
+    return okJson(extra);
+}
+
+std::string apiScenarioLoadInline(const std::string &body, int *httpStatus) {
+    JsonValue req;
+    *httpStatus = 200;
+    if (!jsonParse(body, req) || !req.isObject()) {
+        *httpStatus = 400;
+        return errJson("malformed JSON body");
+    }
+    std::string doc = req.str("scenario");
+    if (doc.empty()) {
+        *httpStatus = 400;
+        return errJson("missing 'scenario' field (a JSON array as a string)");
+    }
+    scenarioLoadString(doc.c_str());
+    if (!scenarioIsLoaded()) {
+        *httpStatus = 400;
+        return errJson("no usable steps: every entry needs an 'at' or a 'when' trigger");
+    }
+    return okJson("\"steps\":" + numToStr(scenarioStepCount()));
+}
+
+std::string apiReplayStart(const std::string &body, int *httpStatus) {
+    JsonValue req;
+    char err[MSG_BUFSIZE] = "";
+
+    *httpStatus = 200;
+    if (!body.empty() && !jsonParse(body, req)) {
+        *httpStatus = 400;
+        return errJson("malformed JSON body");
+    }
+    std::string path = req.str("path");
+    if (path.empty()) {
+        *httpStatus = 400;
+        return errJson("missing 'path' field");
+    }
+    double speed = req.find("speed") ? req.find("speed")->asNumber() : 1.0;
+    bool loop    = req.find("loop")  ? req.find("loop")->asBool()    : false;
+
+    if (!pcapReplayStart(path.c_str(), speed, loop ? 1 : 0, err, sizeof(err))) {
+        *httpStatus = 400;
+        return errJson(err[0] ? err : "failed to start replay");
+    }
+    return okJson("\"path\":" + quoted(path) + ",\"speed\":" + dblToStr(speed));
+}
+
+std::string apiReplayStop(int *httpStatus) {
+    long sent = pcapReplaySent();
+    *httpStatus = 200;
+    pcapReplayStop();
+    return okJson("\"injected\":" + numToStr(sent));
+}
+
 // ---------------------------------------------------------------------------
 // Legacy Named Pipe protocol, expressed on top of the handlers above
 // ---------------------------------------------------------------------------
@@ -486,6 +693,18 @@ std::string controlDispatchJson(const std::string &request) {
         std::string action = req.str("action", "start");
         if (action == "stop") return apiPcapStop(&status);
         return apiPcapStart(request, &status);
+    }
+    if (cmd == "replay") {
+        std::string action = req.str("action", "start");
+        if (action == "stop") return apiReplayStop(&status);
+        return apiReplayStart(request, &status);
+    }
+    if (cmd == "apply")   return apiApplyInline(request, &status);
+    if (cmd == "metrics") return apiMetricsText();
+    if (cmd == "delete_profile") {
+        std::string name = req.str("name");
+        if (name.empty()) return errJson("missing name field");
+        return apiDeleteProfile(name, &status);
     }
 
     return errJson("unknown cmd: " + cmd);

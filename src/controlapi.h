@@ -24,6 +24,7 @@ std::string apiProfilesJson();   // GET  /api/profiles
 std::string apiPresetsJson();    // GET  /api/presets
 std::string apiHealthJson();     // GET  /api/health  (no auth)
 std::string apiDocsJson();       // GET  /api/docs
+std::string apiMetricsText();    // GET  /metrics     (Prometheus, no auth)
 
 // ---------------------------------------------------------------------------
 // REST handlers. body is the raw request body; *httpStatus receives the status
@@ -41,3 +42,8 @@ std::string apiScenarioStart(int *httpStatus);
 std::string apiScenarioStop(int *httpStatus);
 std::string apiPcapStart(const std::string &body, int *httpStatus);
 std::string apiPcapStop(int *httpStatus);
+std::string apiDeleteProfile(const std::string &name, int *httpStatus);
+std::string apiApplyInline(const std::string &body, int *httpStatus);
+std::string apiScenarioLoadInline(const std::string &body, int *httpStatus);
+std::string apiReplayStart(const std::string &body, int *httpStatus);
+std::string apiReplayStop(int *httpStatus);

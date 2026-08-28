@@ -55,6 +55,65 @@ void packetBackendPrepareClone(const PacketNode *src, PacketNode *dst) {
     memcpy(dst->backend.raw, src->backend.raw, PACKET_BACKEND_META_SIZE);
 }
 
+// --- replay injection (T7) ---
+//
+// pcap replay has no captured WINDIVERT_ADDRESS to reuse, so it needs its own
+// send-only handle and a synthesised address. The handle is opened with the
+// filter "false" - it must never receive anything, only send - which is the
+// documented way to get a WinDivert handle purely for injection.
+//
+// Opened lazily on the replay thread, which is its only caller;
+// pcapReplayStop() joins that thread before calling the close below, so no
+// lock is needed here.
+static HANDLE injectHandle = INVALID_HANDLE_VALUE;
+
+int packetBackendInject(char *packet, UINT len, BOOL outbound) {
+    WINDIVERT_ADDRESS addr;
+    UINT sendLen = 0;
+
+    if (!packet || len < sizeof(WINDIVERT_IPHDR)) return 0;
+
+    if (injectHandle == INVALID_HANDLE_VALUE) {
+        injectHandle = WinDivertOpen("false", WINDIVERT_LAYER_NETWORK, 0,
+                                     WINDIVERT_FLAG_SEND_ONLY);
+        if (injectHandle == INVALID_HANDLE_VALUE) {
+            INFO("replay: cannot open a WinDivert injection handle (%lu). "
+                 "Administrator rights are required.", GetLastError());
+            return 0;
+        }
+        LOG("replay: opened send-only WinDivert handle");
+    }
+
+    memset(&addr, 0, sizeof(addr));
+    addr.Layer    = WINDIVERT_LAYER_NETWORK;
+    addr.Event    = WINDIVERT_EVENT_NETWORK_PACKET;
+    addr.Outbound = outbound ? 1 : 0;
+    // The IP version comes from the packet itself; the caller only knows the
+    // direction it wants.
+    addr.IPv6     = (((unsigned char)packet[0] >> 4) == 6) ? 1 : 0;
+    // Marking the packet as an impostor is what lets a running capture tell
+    // replayed traffic apart from live traffic ("not impostor" in a filter).
+    addr.Impostor = 1;
+
+    // Recomputes whatever the recorded packet needs and sets the matching
+    // valid-checksum flags on addr.
+    WinDivertHelperCalcChecksums(packet, len, &addr, 0);
+
+    if (!WinDivertSend(injectHandle, packet, len, &sendLen, &addr)) {
+        LOG("replay: WinDivertSend failed (%lu)", GetLastError());
+        return 0;
+    }
+    return (sendLen >= len) ? 1 : 0;
+}
+
+void packetBackendInjectClose(void) {
+    if (injectHandle != INVALID_HANDLE_VALUE) {
+        WinDivertClose(injectHandle);
+        injectHandle = INVALID_HANDLE_VALUE;
+        LOG("replay: closed injection handle");
+    }
+}
+
 // not to put these in common.h since modules shouldn't see these
 extern PacketNode * const head;
 extern PacketNode * const tail;
@@ -446,6 +505,9 @@ void statsReset(void) {
     int ix;
     InterlockedExchange(&statsCapturedTotal, 0);
     InterlockedExchange(&statsSentTotal, 0);
+    // The delay histogram belongs to the session too; carrying it across a
+    // restart would blend two different module configurations into one curve.
+    latencyReset();
     for (ix = 0; ix < MODULE_CNT; ++ix) {
         InterlockedExchange(&(modules[ix]->affectedCount), 0);
     }

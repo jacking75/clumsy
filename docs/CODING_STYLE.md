@@ -9,7 +9,7 @@ clumsy는 C11에서 C++23으로 **컴파일러만** 전환했습니다. 언어 �
 
 | 구분 | 대상 | 규칙 |
 |---|---|---|
-| **기존 코드** | `divert.cpp`, `packet.cpp`, 11개 모듈(`lag.cpp` 등), `utils.cpp`, `elevate.cpp`, `procfilter.cpp`, `statslog.cpp` | 로직을 그대로 유지. 클래스/템플릿으로 재설계하지 않는다. |
+| **기존 코드** | `divert.cpp`, `packet.cpp`, 12개 모듈(`lag.cpp` 등), `utils.cpp`, `elevate.cpp`, `procfilter.cpp`, `statslog.cpp` | 로직을 그대로 유지. 클래스/템플릿으로 재설계하지 않는다. |
 | **신규 코드** | `httpserver.cpp`, `controlapi.cpp`, `json.cpp`, `pcapexport.cpp`, `report.cpp`, 향후 리눅스 백엔드 | `std::string` / `std::vector` / `std::optional` / RAII를 적극 사용. |
 
 **이유**: 패킷 처리 핫패스(`process()` 계열)는 이미 검증된 코드입니다. 회귀 리스크 대비 재설계 이득이 낮습니다.

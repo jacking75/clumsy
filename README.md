@@ -156,7 +156,7 @@ clumsy.exe --filter "udp and outbound" --lag on --lag-time 100 --drop on --drop-
 | 모듈 | 인수 예시 |
 |------|----------|
 | lag | `--lag on`, `--lag-time 100`, `--lag-inbound on`, `--lag-outbound on` |
-| jitter | `--jitter on`, `--jitter-min 20`, `--jitter-max 150` |
+| jitter | `--jitter on`, `--jitter-min 20`, `--jitter-max 150`, `--jitter-dist pareto` |
 | drop | `--drop on`, `--drop-chance 5.0` |
 | burstloss | `--burstloss on`, `--burstloss-good 2.0`, `--burstloss-bad 80.0`, `--burstloss-gb 5.0`, `--burstloss-bg 20.0` |
 | blackout | `--blackout on`, `--blackout-duration 3000`, `--blackout-gap 30000` |
@@ -164,6 +164,7 @@ clumsy.exe --filter "udp and outbound" --lag on --lag-time 100 --drop on --drop-
 | duplicate | `--duplicate on`, `--duplicate-chance 10.0` |
 | ood | `--ood on`, `--ood-chance 10.0`, `--ood-buffer 5`, `--ood-delay 200` |
 | tamper | `--tamper on`, `--tamper-chance 10.0`, `--tamper-position 1`, `--tamper-checksum on` |
+| corrupt | `--corrupt on`, `--corrupt-chance 50`, `--corrupt-ber 5000` (비트당 ppm) |
 | reset | `--reset on`, `--reset-chance 5.0` |
 | bandwidth | `--bandwidth on`, `--bandwidth-bandwidth 100` |
 
@@ -179,6 +180,7 @@ clumsy.exe --filter "udp and outbound" --lag on --lag-time 100 --drop on --drop-
 - `--pcap-out capture.pcap`: 패킷을 libpcap 형식으로 덤프 (Wireshark 호환)
 - `--pcap-stage pre|post|both`: 모듈 적용 전/후 중 어느 시점을 기록할지 (기본 `post`)
 - `--pcap-max-packets` / `--pcap-max-bytes`: 덤프 크기 상한
+- `--replay-in capture.pcap`: 저장된 pcap을 다시 주입 (`--replay-speed`, `--replay-loop`)
 - `--report-out report.html`: 캡처 종료 시 HTML 세션 리포트 생성
 - `--enable-plugins <디렉토리>`: 커스텀 모듈 DLL 로드 (기본 비활성, 보안 주의)
 - `--verbose on`: 패킷 단위 트레이스 로그
@@ -203,6 +205,7 @@ clumsy.exe --filter "udp and outbound" --lag on --lag-time 100 --drop on --drop-
 | 메서드 / 경로 | 설명 |
 |---|---|
 | `GET /api/health` | 생존 확인 (인증 불필요, CI 헬스체크용) |
+| `GET /metrics` | Prometheus 텍스트 노출 형식 (인증 불필요) |
 | `GET /api/status` | 캡처 상태, 필터, 마지막 메시지 |
 | `GET /api/modules` | 모듈 전체 상태 + 폼 자동 생성용 ParamSpec |
 | `GET /api/stats` | 실시간 통계 |
@@ -212,8 +215,12 @@ clumsy.exe --filter "udp and outbound" --lag on --lag-time 100 --drop on --drop-
 | `POST /api/stop` | 캡처 중지 |
 | `POST /api/modules/{shortName}` | 모듈 활성화/파라미터 변경 |
 | `POST /api/profiles/{name}/apply` | 프로파일 적용 |
+| `POST /api/profiles/{name}/delete` | 프로파일 삭제 |
+| `POST /api/apply` | 여러 모듈을 저장 없이 한 번에 설정 |
 | `POST /api/presets` | 필터 프리셋 저장 (config.json에 기록) |
+| `POST /api/scenario/loadinline` | 요청 본문의 시나리오를 파일 없이 로드 |
 | `POST /api/pcap/start` / `stop` | pcap 덤프 제어 |
+| `POST /api/replay/start` / `stop` | 저장된 pcap 재생 제어 |
 
 예시:
 
@@ -222,6 +229,26 @@ curl http://127.0.0.1:8080/api/status
 curl -X POST http://127.0.0.1:8080/api/modules/drop \
      -H "Content-Type: application/json" \
      -d "{\"enabled\":true,\"drop-chance\":10.0}"
+```
+
+### Prometheus / Grafana
+
+`GET /metrics`가 Prometheus 텍스트 형식을 반환하므로, 여러 테스트 머신의 clumsy를
+코드 한 줄 없이 한 대시보드에서 볼 수 있습니다. 인증이 필요 없습니다.
+
+```yaml
+# prometheus.yml
+scrape_configs:
+  - job_name: clumsy
+    static_configs:
+      - targets: ['10.0.0.5:8080', '10.0.0.6:8080']
+    metrics_path: /metrics
+```
+
+```promql
+rate(clumsy_module_affected_packets_total[1m])              # 모듈별 초당 처리량
+histogram_quantile(0.95, rate(clumsy_latency_ms_bucket[5m])) # 지연 p95
+clumsy_capturing == 0                                        # 멈춘 인스턴스 찾기
 ```
 
 
@@ -270,7 +297,7 @@ clumsy/
 │   ├── controlapi.cpp  # 트랜스포트 독립 제어 계층 (HTTP/Pipe 공용)
 │   ├── json.cpp        # 최소 JSON 파서/직렬화
 │   ├── lag.cpp         # 모듈: 고정 지연
-│   ├── jitter.cpp      # 모듈: 랜덤 지연 (min~max)
+│   ├── jitter.cpp      # 모듈: 랜덤 지연 (uniform/normal/pareto)
 │   ├── drop.cpp        # 모듈: 확률적 패킷 드롭
 │   ├── burstloss.cpp   # 모듈: 버스트 손실 (Gilbert-Elliott)
 │   ├── blackout.cpp    # 모듈: 연결 두절
@@ -278,6 +305,7 @@ clumsy/
 │   ├── duplicate.cpp   # 모듈: 패킷 복제
 │   ├── ood.cpp         # 모듈: 패킷 순서 뒤섞기
 │   ├── tamper.cpp      # 모듈: 페이로드 변조
+│   ├── corrupt.cpp     # 모듈: 비트 에러 주입 (무선 손상)
 │   ├── reset.cpp       # 모듈: TCP RST 강제 전송
 │   ├── bandwidth.cpp   # 모듈: 대역폭 제한
 │   ├── pipe.cpp        # Named Pipe 제어 API (트랜스포트만)
@@ -286,6 +314,8 @@ clumsy/
 │   ├── statslog.cpp    # 통계 로그 파일 출력
 │   ├── procfilter.cpp  # 프로세스별 필터링
 │   ├── pcapexport.cpp  # libpcap 형식 패킷 덤프
+│   ├── pcapreplay.cpp  # 저장된 pcap 재주입 (스트리밍 파서 + 재생 스레드)
+│   ├── latency.cpp     # 지연 히스토그램 (p50/p95/p99)
 │   ├── report.cpp      # HTML 세션 리포트 생성
 │   └── plugin.cpp      # 커스텀 모듈 DLL 로더 (옵션)
 ├── etc/                # 설정 파일, 리소스
@@ -297,9 +327,13 @@ clumsy/
 │   └── clumsy.sln
 ├── external/           # 외부 라이브러리 (WinDivert, Windows 전용)
 ├── packaging/          # .deb / .rpm 패키징 정의
-├── tests/              # 독립 실행 검증 프로그램
+├── tests/              # 검증 스위트 (자세한 내용은 tests/README.md)
 │   ├── packetutil_test.cpp        # 패킷 헬퍼 계약 테스트 (양 플랫폼 공용)
+│   ├── latency_test.cpp           # 지연 분위수 단위 테스트 (양 플랫폼 공용)
+│   ├── windows/api_test.ps1       # REST API 회귀 (권한 불필요)
 │   ├── windows/capture_test.ps1   # Windows 실캡처 회귀 (관리자 권한 필요)
+│   ├── linux/api_test.sh          # REST API 회귀 (권한 불필요)
+│   ├── linux/behaviour_test.sh    # 실패킷 동작 검증 (root 필요)
 │   └── linux/nfqtest.cpp          # NFQUEUE 능력 프로브
 ├── docs/
 │   ├── CODING_STYLE.md # 코드 스타일 원칙

@@ -211,6 +211,25 @@ int profileApply(const char *name) {
     return 0;
 }
 
+static void profilesWriteAll(void);
+
+// Removes a profile and rewrites profiles.json. Returns 0 when the name is
+// unknown, so the caller can answer 404 rather than pretending it worked.
+int profileDelete(const char *name) {
+    int i, j;
+    for (i = 0; i < nProfiles; i++) {
+        if (strcmp(profiles[i].name, name) == 0) {
+            for (j = i; j < nProfiles - 1; j++) profiles[j] = profiles[j + 1];
+            nProfiles--;
+            profilesWriteAll();
+            INFO("profiles: deleted '%s'", name);
+            return 1;
+        }
+    }
+    LOG("profiles: cannot delete '%s' - not found", name);
+    return 0;
+}
+
 int profileCount(void) {
     return nProfiles;
 }

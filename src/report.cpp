@@ -219,6 +219,87 @@ static int renderChart(char *buf, int bufSize, int pos) {
     return pos;
 }
 
+// Inline SVG bar chart of the delay histogram, plus the percentile summary.
+//
+// The whole point of this section is that a mean hides the tail: a session
+// whose p50 is 40ms and whose p99 is 900ms is a very different bug report from
+// one that sits flat at 60ms, and the two have almost the same average.
+static int renderLatency(char *buf, int bufSize, int pos) {
+    const int W = 900, H = 240, PADL = 48, PADB = 46, PADT = 16;
+    LONG total = latencyCount();
+    LONG peak = 1;
+    int i, drawn = 0;
+    double barW;
+
+    if (total <= 0) {
+        return appendf(buf, bufSize, pos,
+            "<p class=\"muted\">No packet was delayed during this session, so "
+            "there is no latency to summarise. Enable Lag or Jitter to collect "
+            "this section.</p>\n");
+    }
+
+    for (i = 0; i < LATENCY_BUCKETS; ++i) {
+        if (latencyBucketCount(i) > peak) peak = latencyBucketCount(i);
+    }
+
+    pos = appendf(buf, bufSize, pos,
+        "<div class=\"cards\">"
+        "<div class=\"card\"><span class=\"muted\">Delayed</span><b>%ld</b></div>"
+        "<div class=\"card\"><span class=\"muted\">Min</span><b>%ld ms</b></div>"
+        "<div class=\"card\"><span class=\"muted\">Mean</span><b>%.1f ms</b></div>"
+        "<div class=\"card\"><span class=\"muted\">p50</span><b>%.0f ms</b></div>"
+        "<div class=\"card\"><span class=\"muted\">p95</span><b>%.0f ms</b></div>"
+        "<div class=\"card\"><span class=\"muted\">p99</span><b>%.0f ms</b></div>"
+        "<div class=\"card\"><span class=\"muted\">Max</span><b>%ld ms</b></div>"
+        "</div>\n",
+        (long)total, (long)latencyMin(), latencyMean(),
+        latencyPercentile(50), latencyPercentile(95), latencyPercentile(99),
+        (long)latencyMax());
+
+    barW = (double)(W - PADL - 12) / (double)LATENCY_BUCKETS;
+
+    pos = appendf(buf, bufSize, pos,
+        "<svg viewBox=\"0 0 %d %d\" width=\"100%%\" role=\"img\" "
+        "aria-label=\"distribution of packet delay\">\n"
+        "<rect x=\"0\" y=\"0\" width=\"%d\" height=\"%d\" fill=\"#fbfbfd\" stroke=\"#e2e2ea\"/>\n"
+        "<line x1=\"%d\" y1=\"%d\" x2=\"%d\" y2=\"%d\" stroke=\"#c8c8d4\"/>\n"
+        "<text x=\"4\" y=\"12\" font-size=\"11\" fill=\"#666\">%ld pkt</text>\n",
+        W, H, W, H, PADL, H - PADB, W - 12, H - PADB, (long)peak);
+
+    for (i = 0; i < LATENCY_BUCKETS; ++i) {
+        LONG count = latencyBucketCount(i);
+        LONG upper = latencyBucketUpper(i);
+        double x = PADL + i * barW;
+        double barH = ((double)count / (double)peak) * (H - PADB - PADT);
+        char label[24];
+
+        if (upper != 0) snprintf(label, sizeof(label), "%ld", (long)upper);
+        else            snprintf(label, sizeof(label), "more");
+
+        if (count > 0) {
+            pos = appendf(buf, bufSize, pos,
+                "<rect x=\"%.1f\" y=\"%.1f\" width=\"%.1f\" height=\"%.1f\" "
+                "fill=\"#3b76d8\" opacity=\".85\"><title>%s ms: %ld packets</title></rect>\n",
+                x + 1.0, (double)(H - PADB) - barH, barW - 2.0, barH,
+                label, (long)count);
+            drawn++;
+        }
+        // Label every other bucket; 13 labels across 900px would collide.
+        if ((i % 2) == 0) {
+            pos = appendf(buf, bufSize, pos,
+                "<text x=\"%.1f\" y=\"%d\" font-size=\"10\" fill=\"#666\" "
+                "text-anchor=\"middle\">%s</text>\n",
+                x + barW / 2.0, H - PADB + 14, label);
+        }
+    }
+
+    pos = appendf(buf, bufSize, pos,
+        "<text x=\"%d\" y=\"%d\" font-size=\"10\" fill=\"#666\">bucket upper bound (ms)"
+        "</text>\n</svg>\n", PADL, H - 8);
+    (void)drawn;
+    return pos;
+}
+
 // Renders the whole page under reportLock so an in-flight reportTick() cannot
 // grow the arrays midway through.
 static int renderLocked(char *buf, int bufSize) {
@@ -288,6 +369,10 @@ static int renderLocked(char *buf, int bufSize) {
     pos = renderChart(buf, bufSize, pos);
     pos = appendf(buf, bufSize, pos, "</div>\n");
 
+    pos = appendf(buf, bufSize, pos, "<h2>Delay distribution</h2>\n<div class=\"wrap\">\n");
+    pos = renderLatency(buf, bufSize, pos);
+    pos = appendf(buf, bufSize, pos, "</div>\n");
+
     // --- module table ---
     pos = appendf(buf, bufSize, pos,
         "<h2>Modules</h2>\n<div class=\"wrap\"><table>\n"
@@ -335,6 +420,15 @@ static int renderLocked(char *buf, int bufSize) {
         pos = appendf(buf, bufSize, pos,
             "<h2>Packet capture</h2>\n<p>%ld packets written to <code>%s</code>.</p>\n",
             pcapExportCount(), pesc);
+    }
+
+    if (pcapReplayPath()[0]) {
+        char resc[MSG_BUFSIZE * 2];
+        htmlEscapeInto(pcapReplayPath(), resc, sizeof(resc));
+        pos = appendf(buf, bufSize, pos,
+            "<h2>Packet replay</h2>\n<p>%ld packets read from <code>%s</code>, "
+            "%ld injected, %ld skipped.</p>\n",
+            pcapReplayRead(), resc, pcapReplaySent(), pcapReplayFailed());
     }
 
     pos = appendf(buf, bufSize, pos,

@@ -37,6 +37,7 @@ Module* modules[MODULE_CNT] = {
     &dupModule,
     &oodModule,
     &tamperModule,
+    &corruptModule,
     &resetModule,
     &bandwidthModule,
 };
@@ -593,8 +594,8 @@ static void printUsage(void) {
 "                           for anything else)\n"
 "  --web-token <token>      fixed auth token instead of a random one\n"
 "\n"
-"Modules (11):  lag jitter drop burstloss blackout throttle duplicate ood\n"
-"               tamper reset bandwidth\n"
+"Modules (12):  lag jitter drop burstloss blackout throttle duplicate ood\n"
+"               tamper corrupt reset bandwidth\n"
 "  --<module> on|off        enable a module,   e.g. --drop on\n"
 "  --<module>-<param> <v>   set a parameter,   e.g. --drop-chance 10.0\n"
 "\n"
@@ -607,6 +608,9 @@ static void printUsage(void) {
 "  --pcap-out <path>        dump captured packets to a libpcap file\n"
 "  --pcap-max-packets <n>   stop the pcap dump after N packets (0=unlimited)\n"
 "  --pcap-max-bytes <n>     stop the pcap dump after N bytes  (0=unlimited)\n"
+"  --replay-in <path>       replay a libpcap file back onto the wire\n"
+"  --replay-speed <x>       replay rate multiplier (default 1.0)\n"
+"  --replay-loop on         restart the replay when the file ends\n"
 "  --report-out <path>      write an HTML session report on stop\n"
 "  --enable-plugins <dir>   load custom module DLLs from <dir>\n"
 "  --verbose on|off         per-packet trace logging\n"
@@ -621,6 +625,7 @@ int main(int argc, char* argv[]) {
 
     InitializeCriticalSection(&appLock);
     pcapExportInit();
+    pcapReplayInit();
     reportInit();
     srand((unsigned int)time(NULL));
 
@@ -740,6 +745,19 @@ int main(int argc, char* argv[]) {
         }
     }
 
+    // Replay is independent of capture: it can feed a recorded session back
+    // onto the wire with no filter set at all.
+    if (argGet("replay-in")) {
+        char err[MSG_BUFSIZE] = "";
+        const char *speedArg = argGet("replay-speed");
+        double speed = speedArg ? atof(speedArg) : 1.0;
+        if (!pcapReplayStart(argGet("replay-in"), speed,
+                             parseBoolValue(argGet("replay-loop")),
+                             err, sizeof(err))) {
+            INFO("Failed to start replay: %s", err);
+        }
+    }
+
     timeoutSec      = argGetInt("timeout", 0);
     statsConsoleSec = argGetInt("stats-console", 10);
     startTick       = GetTickCount();
@@ -794,6 +812,7 @@ int main(int argc, char* argv[]) {
     (void)lastTick;
 
     // ---- cleanup ----
+    pcapReplayStop();   // joins the replay thread before the backend closes
     appStopCapture();
     httpServerStop();
     pipeServerStop();

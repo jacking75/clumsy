@@ -19,15 +19,26 @@
   color-scheme:light dark;
   --bg:#f6f6f9; --panel:#fff; --fg:#1b1b21; --muted:#6a6a78;
   --line:#e3e3ec; --accent:#3b76d8; --ok:#2f9e5f; --warn:#d0663f; --err:#cc4444;
+  --link:#2f66c4;
   --mono:ui-monospace,SFMono-Regular,Consolas,"Liberation Mono",monospace;
 }
 @media (prefers-color-scheme:dark){
-  :root{ --bg:#141418; --panel:#1c1c22; --fg:#e7e7ee; --muted:#9494a4;
-         --line:#2c2c36; --accent:#6f9cf0; }
+  :root:not([data-theme="light"]){
+         --bg:#141418; --panel:#1c1c22; --fg:#e7e7ee; --muted:#9494a4;
+         --line:#2c2c36; --accent:#6f9cf0; --link:#6f9cf0; }
+}
+:root[data-theme="dark"]{
+  --bg:#141418; --panel:#1c1c22; --fg:#e7e7ee; --muted:#9494a4;
+  --line:#2c2c36; --accent:#6f9cf0; --link:#6f9cf0;
 }
 *{box-sizing:border-box}
 body{margin:0;background:var(--bg);color:var(--fg);
      font:14px/1.55 system-ui,-apple-system,"Segoe UI",sans-serif}
+/* Links must come from the palette, not the browser default: the default
+   :visited purple is almost invisible against the dark panel, which only
+   became obvious once the theme could be forced rather than inherited. */
+a,a:visited{color:var(--link)}
+a:hover{text-decoration:none}
 header{display:flex;flex-wrap:wrap;align-items:center;gap:.75rem;
        padding:.75rem 1.25rem;background:var(--panel);border-bottom:1px solid var(--line);
        position:sticky;top:0;z-index:5}
@@ -82,6 +93,24 @@ details summary{cursor:pointer;color:var(--muted);font-size:.85rem;
                 margin-bottom:.5rem;user-select:none}
 .fb-grid{display:flex;flex-wrap:wrap;gap:.6rem;align-items:flex-end}
 .fb-out{margin-top:.7rem}
+/* per-module throughput sparkline, drawn only while the module is doing work */
+canvas.spark{width:110px;height:24px;display:none;margin-left:.5rem;opacity:.9}
+.mod.on canvas.spark{display:inline-block}
+.mod-head .count{margin-left:auto}
+#themeBtn{padding:.28rem .6rem;font-size:.8rem;line-height:1.2}
+/* scenario editor */
+.step{border:1px solid var(--line);border-radius:6px;padding:.55rem .7rem;margin-bottom:.5rem}
+.step .row{gap:.45rem}
+.step-head{display:flex;align-items:center;gap:.5rem;margin-bottom:.45rem}
+.step-head b{font-size:.85rem}
+.step-head .rm{margin-left:auto;border-color:var(--err);color:var(--err);
+               padding:.2rem .5rem;font-size:.78rem}
+.chg{display:flex;gap:.4rem;align-items:center;margin-top:.35rem}
+.chg select{flex:0 1 15rem}
+.chg input{flex:0 1 8rem}
+.chg button{padding:.2rem .5rem;font-size:.78rem}
+#scenarioJson{min-height:8rem;font-size:.8rem}
+.lat{font-variant-numeric:tabular-nums}
 @media (max-width:640px){ main{padding:.75rem} section{padding:.8rem} }
 </style>
 </head>
@@ -93,6 +122,7 @@ details summary{cursor:pointer;color:var(--muted);font-size:.85rem;
   <span class="ver" id="version"></span>
   <span class="spacer"></span>
   <span class="small muted" id="adminNote"></span>
+  <button id="themeBtn" title="Switch between light and dark">Theme</button>
   <a class="small" href="/api/report" download>Download report</a>
   <a class="small" href="/api/docs" target="_blank" rel="noopener">API</a>
 </header>
@@ -176,6 +206,18 @@ details summary{cursor:pointer;color:var(--muted);font-size:.85rem;
       <div class="card"><span>Buffers (lag/jit/bw)</span><b id="sBuffers">0/0/0</b></div>
     </div>
     <canvas id="chart" width="900" height="150" aria-label="captured packets per second"></canvas>
+    <div class="cards" style="margin-top:.7rem">
+      <div class="card"><span>Delay p50</span><b class="lat" id="sP50">-</b></div>
+      <div class="card"><span>Delay p95</span><b class="lat" id="sP95">-</b></div>
+      <div class="card"><span>Delay p99</span><b class="lat" id="sP99">-</b></div>
+      <div class="card"><span>Delay max</span><b class="lat" id="sPMax">-</b></div>
+      <div class="card"><span>Delayed packets</span><b class="lat" id="sLatN">0</b></div>
+    </div>
+    <p class="small muted" style="margin:.5rem 0 0">
+      Percentiles come from the Lag and Jitter delay histogram, so they stay
+      empty until one of those modules is doing work. The full distribution is
+      in the <a href="/api/report" download>session report</a>.
+    </p>
   </section>
 
   <section>
@@ -196,6 +238,7 @@ details summary{cursor:pointer;color:var(--muted);font-size:.85rem;
         <input type="text" id="profileName" placeholder="mobile-4g" autocomplete="off">
       </div>
       <button id="saveProfile">Save</button>
+      <button class="danger" id="deleteProfile">Delete</button>
     </div>
     <div class="row" style="margin-top:.8rem">
       <div style="flex:0 1 18rem">
@@ -215,6 +258,48 @@ details summary{cursor:pointer;color:var(--muted);font-size:.85rem;
       <button id="pcapStart">Start dump</button>
       <button id="pcapStop">Stop dump</button>
       <span class="small muted" id="pcapInfo"></span>
+    </div>
+    <div class="row" style="margin-top:.8rem">
+      <div style="flex:0 1 18rem">
+        <label for="replayPath">pcap file to replay</label>
+        <input type="text" id="replayPath" class="mono" placeholder="clumsy.pcap" autocomplete="off">
+      </div>
+      <div style="flex:0 1 6rem">
+        <label for="replaySpeed">Speed</label>
+        <input type="number" id="replaySpeed" value="1" min="0.01" max="100" step="0.1">
+      </div>
+      <label class="switch" style="flex:0 0 auto;margin-bottom:.45rem">
+        <input type="checkbox" id="replayLoop"> loop
+      </label>
+      <button id="replayStart">Replay</button>
+      <button id="replayStop">Stop replay</button>
+      <span class="small muted" id="replayInfo"></span>
+    </div>
+    <p class="small muted" style="margin:.6rem 0 0">
+      Replay re-injects recorded packets outbound. On Linux only outbound
+      packets can be replayed, and the recorded addresses are sent as-is - so
+      replay a capture on the machine it makes sense for.
+    </p>
+  </section>
+
+  <section>
+    <h2>Scenario editor</h2>
+    <p class="small muted" style="margin:0 0 .7rem">
+      Build the steps here and load them straight into clumsy - no file needed.
+      The JSON below is the document that gets sent, and you can edit or paste
+      into it directly; the builder only overwrites it when you change a step.
+    </p>
+    <div id="steps"></div>
+    <div class="row" style="margin-bottom:.8rem">
+      <button id="addStep">+ Add step</button>
+      <span class="small muted">Time steps fire N seconds after capture starts; condition steps fire whenever the metric matches.</span>
+    </div>
+    <label for="scenarioJson">Scenario JSON</label>
+    <textarea id="scenarioJson" class="mono" spellcheck="false"></textarea>
+    <div class="row" style="margin-top:.6rem">
+      <button class="primary" id="scenarioLoadInline">Load into clumsy</button>
+      <button id="scenarioLoadStart">Load &amp; start</button>
+      <span class="small muted" id="scenarioEditInfo"></span>
     </div>
   </section>
 
@@ -239,6 +324,38 @@ function api(path, options) {
 }
 
 const $ = id => document.getElementById(id);
+
+// ---------------------------------------------------------------------------
+// Theme  (T6)
+//
+// Three states, not two: "system" leaves the attribute off so the CSS media
+// query decides, and the two explicit choices stamp data-theme so the user
+// beats the OS in both directions.
+// ---------------------------------------------------------------------------
+
+function systemPrefersDark() {
+  return window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches;
+}
+
+function applyTheme(t) {
+  if (t === "light" || t === "dark") {
+    document.documentElement.setAttribute("data-theme", t);
+    localStorage.setItem("clumsy-theme", t);
+  } else {
+    document.documentElement.removeAttribute("data-theme");
+    localStorage.removeItem("clumsy-theme");
+  }
+  const btn = $("themeBtn");
+  if (btn) btn.textContent = t === "dark" ? "Dark" : t === "light" ? "Light" : "Auto";
+  // The canvases paint with colours read from CSS custom properties, so they
+  // have to be redrawn after a theme change or they keep the old palette.
+  if (typeof drawChart === "function") drawChart();
+  redrawAllSparks();
+}
+
+function currentTheme() {
+  return localStorage.getItem("clumsy-theme") || "auto";
+}
 
 function setStatus(text, isError) {
   const el = $("status");
@@ -277,6 +394,24 @@ function paramInput(mod, spec, currentValue) {
     lab.appendChild(cb);
     lab.appendChild(document.createTextNode(spec.label));
     wrap.appendChild(lab);
+    return wrap;
+  }
+
+  // Enum: the server ships the choices with the spec, so this stays generic.
+  if (spec.type === "enum" && Array.isArray(spec.options)) {
+    wrap.className = "param wide";
+    const lab = document.createElement("label");
+    lab.textContent = spec.label;
+    lab.htmlFor = "p_" + spec.key;
+    const sel = document.createElement("select");
+    sel.id = "p_" + spec.key;
+    spec.options.forEach(o => sel.appendChild(new Option(o, o)));
+    if (currentValue !== undefined) sel.value = currentValue;
+    sel.onchange = () => postModule(mod.shortName, { [spec.key]: sel.value })
+      .then(() => setStatus(mod.displayName + " " + spec.label.toLowerCase() + " = " + sel.value))
+      .catch(fail);
+    wrap.appendChild(lab);
+    wrap.appendChild(sel);
     return wrap;
   }
 
@@ -342,6 +477,15 @@ function renderModules(mods) {
     count.dataset.count = mod.shortName;
     count.textContent = mod.affected + " affected";
     head.appendChild(count);
+
+    const spark = document.createElement("canvas");
+    spark.className = "spark";
+    spark.dataset.spark = mod.shortName;
+    spark.width = 220;   // backing store; CSS sets the displayed size
+    spark.height = 48;
+    spark.title = "packets affected per second";
+    head.appendChild(spark);
+
     box.appendChild(head);
 
     const params = document.createElement("div");
@@ -402,6 +546,55 @@ function drawChart() {
   ctx.fillText(max + " pkt/s", 4, 12);
 }
 
+// Per-module affected/sec, kept as a short ring buffer each card draws from.
+const modHist = {};
+const modLast = {};
+
+function drawSpark(name, series) {
+  const c = document.querySelector('canvas[data-spark="' + name + '"]');
+  if (!c || !c.clientWidth) return;   // hidden while the module is off
+  const ctx = c.getContext("2d");
+  const dpr = window.devicePixelRatio || 1;
+  const w = c.clientWidth, h = c.clientHeight;
+  if (c.width !== Math.round(w * dpr) || c.height !== Math.round(h * dpr)) {
+    c.width = Math.round(w * dpr);
+    c.height = Math.round(h * dpr);
+  }
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, w, h);
+  if (!series || series.length < 2) return;
+
+  const css = getComputedStyle(document.documentElement);
+  const accent = css.getPropertyValue("--accent").trim() || "#3b76d8";
+  const max = Math.max(1, ...series);
+
+  // Filled area rather than a bare line: at 24px tall a line alone is hard to
+  // read, and the fill makes an idle module obviously flat.
+  ctx.beginPath();
+  series.forEach((v, i) => {
+    const x = (i / (series.length - 1)) * w;
+    const y = h - (v / max) * (h - 3) - 1.5;
+    i ? ctx.lineTo(x, y) : ctx.moveTo(x, y);
+  });
+  ctx.strokeStyle = accent;
+  ctx.lineWidth = 1.5;
+  ctx.stroke();
+  ctx.lineTo(w, h); ctx.lineTo(0, h); ctx.closePath();
+  ctx.fillStyle = accent;
+  ctx.globalAlpha = 0.16;
+  ctx.fill();
+  ctx.globalAlpha = 1;
+}
+
+function redrawAllSparks() {
+  Object.keys(modHist).forEach(name => drawSpark(name, modHist[name]));
+}
+
+function fmtMs(v) {
+  if (v === undefined || v === null) return "-";
+  return (v >= 100 ? Math.round(v) : Math.round(v * 10) / 10) + " ms";
+}
+
 function applyStats(s) {
   $("sCaptured").textContent = s.captured;
   $("sSent").textContent = s.sent;
@@ -410,6 +603,9 @@ function applyStats(s) {
     s.buffers.lag + "/" + s.buffers.jitter + "/" + s.buffers.bandwidth;
 
   const now = Date.now();
+  // Captured before lastStamp is overwritten below - reading it afterwards
+  // makes the interval zero and the sparklines never receive a sample.
+  const dtMs = (lastStamp && now > lastStamp) ? (now - lastStamp) : 0;
   if (lastStamp && now > lastStamp) {
     const pps = Math.max(0, Math.round((s.captured - lastCaptured) * 1000 / (now - lastStamp)));
     $("sPps").textContent = pps;
@@ -421,8 +617,9 @@ function applyStats(s) {
   lastStamp = now;
 
   Object.keys(s.modules).forEach(name => {
+    const affected = s.modules[name].affected;
     const el = document.querySelector('[data-count="' + name + '"]');
-    if (el) el.textContent = s.modules[name].affected + " affected";
+    if (el) el.textContent = affected + " affected";
     const box = document.querySelector('.mod[data-name="' + name + '"]');
     if (box) {
       const cb = box.querySelector(".mod-head input[type=checkbox]");
@@ -432,7 +629,36 @@ function applyStats(s) {
         box.classList.toggle("on", cb.checked);
       }
     }
+
+    // Rate, not the raw counter: a cumulative total drawn as a sparkline is
+    // just a ramp and tells you nothing about when the module was busy.
+    if (dtMs > 0) {
+      const prev = (modLast[name] !== undefined) ? modLast[name] : affected;
+      const rate = Math.max(0, Math.round((affected - prev) * 1000 / dtMs));
+      const series = (modHist[name] = modHist[name] || []);
+      series.push(rate);
+      while (series.length > 90) series.shift();
+      drawSpark(name, series);
+    }
+    modLast[name] = affected;
   });
+
+  if (s.latency) {
+    const has = s.latency.count > 0;
+    $("sP50").textContent  = has ? fmtMs(s.latency.p50) : "-";
+    $("sP95").textContent  = has ? fmtMs(s.latency.p95) : "-";
+    $("sP99").textContent  = has ? fmtMs(s.latency.p99) : "-";
+    $("sPMax").textContent = has ? fmtMs(s.latency.max) : "-";
+    $("sLatN").textContent = s.latency.count;
+  }
+
+  if (s.replay) {
+    $("replayInfo").textContent = s.replay.active
+      ? ("replaying - " + s.replay.sent + " injected, " + s.replay.read + " read")
+      : (s.replay.read ? ("idle - " + s.replay.sent + "/" + s.replay.read + " injected"
+                          + (s.replay.failed ? ", " + s.replay.failed + " skipped" : ""))
+                       : "not replaying");
+  }
 
   $("scenarioInfo").textContent = s.scenario.loaded
     ? (s.scenario.steps + " steps" + (s.scenario.active ? ", running" : ", idle"))
@@ -527,6 +753,32 @@ $("saveProfile").onclick = () => {
     .catch(fail);
 };
 
+$("deleteProfile").onclick = () => {
+  const name = $("profile").value;
+  if (!name) return setStatus("Choose a profile to delete first.", true);
+  if (!confirm("Delete profile '" + name + "' from profiles.json?")) return;
+  api("/api/profiles/" + encodeURIComponent(name) + "/delete", { method: "POST" })
+    .then(() => { setStatus("Profile '" + name + "' deleted."); return refreshProfiles(); })
+    .catch(fail);
+};
+
+$("replayStart").onclick = () => {
+  const path = $("replayPath").value.trim();
+  if (!path) return setStatus("Enter a pcap file to replay first.", true);
+  api("/api/replay/start", {
+    method: "POST",
+    body: JSON.stringify({
+      path,
+      speed: parseFloat($("replaySpeed").value) || 1.0,
+      loop: $("replayLoop").checked
+    })
+  }).then(d => setStatus("Replaying " + d.path + " at " + d.speed + "x.")).catch(fail);
+};
+
+$("replayStop").onclick = () =>
+  api("/api/replay/stop", { method: "POST" })
+    .then(d => setStatus("Replay stopped after " + d.injected + " packets.")).catch(fail);
+
 $("scenarioLoad").onclick = () => {
   const path = $("scenarioPath").value.trim();
   if (!path) return setStatus("Enter a scenario file path first.", true);
@@ -549,6 +801,259 @@ $("pcapStart").onclick = () => {
 $("pcapStop").onclick = () =>
   api("/api/pcap/stop", { method: "POST" })
     .then(d => setStatus("pcap closed after " + d.packets + " packets.")).catch(fail);
+
+// ---------------------------------------------------------------------------
+// Scenario editor  (T4)
+//
+// Builds the same JSON document the file loader accepts and posts it inline,
+// so composing a scenario no longer means finding a writable path and typing
+// it back into the box. The textarea is the source of truth on load: the
+// builder writes into it, but a hand-edited or pasted document is sent as-is.
+// ---------------------------------------------------------------------------
+
+const METRICS = ["captured_count", "sent_count", "pps", "elapsed_sec",
+                 "lag_buf", "jitter_buf", "bandwidth_buf"];
+
+let scenarioSteps = [];
+
+// Every key a step may set: each module's on/off switch plus its parameters.
+// Read from moduleCache so a new module shows up here with no edit at all.
+function changeKeys() {
+  const out = [];
+  moduleCache.forEach(m => {
+    out.push({ key: m.shortName, label: m.displayName + " — on/off", kind: "bool" });
+    (m.paramSpecs || []).forEach(sp => {
+      if (sp.type === "action") return;   // a trigger has no value to schedule
+      out.push({
+        key: sp.key,
+        label: m.displayName + " — " + sp.label,
+        kind: sp.type,
+        options: sp.options
+      });
+    });
+  });
+  return out;
+}
+
+function metricNames() {
+  return METRICS.concat(moduleCache.map(m => "affected:" + m.shortName));
+}
+
+function stepToObject(st) {
+  const o = {};
+  if (st.trigger === "at") {
+    o.at = Number(st.at) || 0;
+  } else {
+    o.when = st.when;
+    o.op = st.op;
+    o.value = Number(st.value) || 0;
+  }
+  if (Number(st.repeat) > 0) {
+    o.repeat = Number(st.repeat);
+    if (Number(st.times) > 0) o.times = Number(st.times);
+  }
+  st.changes.forEach(c => {
+    if (!c.key) return;
+    // Booleans go out unquoted so the scenario file reads the way a
+    // hand-written one does.
+    if (c.value === "true" || c.value === "false") o[c.key] = (c.value === "true");
+    else if (c.value !== "" && !isNaN(Number(c.value))) o[c.key] = Number(c.value);
+    else o[c.key] = c.value;
+  });
+  return o;
+}
+
+function scenarioToJson() {
+  return JSON.stringify(scenarioSteps.map(stepToObject), null, 2);
+}
+
+function syncPreview() {
+  $("scenarioJson").value = scenarioToJson();
+}
+
+function renderSteps() {
+  const host = $("steps");
+  host.textContent = "";
+  const keys = changeKeys();
+
+  scenarioSteps.forEach((st, ix) => {
+    const box = document.createElement("div");
+    box.className = "step";
+
+    const head = document.createElement("div");
+    head.className = "step-head";
+    const title = document.createElement("b");
+    title.textContent = "Step " + (ix + 1);
+    head.appendChild(title);
+
+    const trig = document.createElement("select");
+    trig.appendChild(new Option("at time", "at"));
+    trig.appendChild(new Option("when metric", "when"));
+    trig.value = st.trigger;
+    trig.style.flex = "0 1 9rem";
+    trig.onchange = () => { st.trigger = trig.value; renderSteps(); syncPreview(); };
+    head.appendChild(trig);
+
+    const rm = document.createElement("button");
+    rm.className = "rm";
+    rm.textContent = "Remove";
+    rm.onclick = () => { scenarioSteps.splice(ix, 1); renderSteps(); syncPreview(); };
+    head.appendChild(rm);
+    box.appendChild(head);
+
+    const row = document.createElement("div");
+    row.className = "row";
+
+    const field = (labelText, el, width) => {
+      const d = document.createElement("div");
+      d.style.flex = "0 1 " + width;
+      const l = document.createElement("label");
+      l.textContent = labelText;
+      d.appendChild(l);
+      d.appendChild(el);
+      return d;
+    };
+
+    if (st.trigger === "at") {
+      const at = document.createElement("input");
+      at.type = "number"; at.min = 0; at.value = st.at;
+      at.onchange = () => { st.at = at.value; syncPreview(); };
+      row.appendChild(field("Seconds after start", at, "9rem"));
+    } else {
+      const metric = document.createElement("select");
+      metricNames().forEach(m => metric.appendChild(new Option(m, m)));
+      metric.value = st.when;
+      metric.onchange = () => { st.when = metric.value; syncPreview(); };
+      row.appendChild(field("Metric", metric, "12rem"));
+
+      const op = document.createElement("select");
+      [">=", ">", "<=", "<", "=="].forEach(o => op.appendChild(new Option(o, o)));
+      op.value = st.op;
+      op.onchange = () => { st.op = op.value; syncPreview(); };
+      row.appendChild(field("Op", op, "5rem"));
+
+      const val = document.createElement("input");
+      val.type = "number"; val.value = st.value;
+      val.onchange = () => { st.value = val.value; syncPreview(); };
+      row.appendChild(field("Value", val, "8rem"));
+    }
+
+    const rep = document.createElement("input");
+    rep.type = "number"; rep.min = 0; rep.value = st.repeat;
+    rep.onchange = () => { st.repeat = rep.value; syncPreview(); };
+    row.appendChild(field("Repeat every (s, 0=once)", rep, "11rem"));
+
+    const times = document.createElement("input");
+    times.type = "number"; times.min = 0; times.value = st.times;
+    times.onchange = () => { st.times = times.value; syncPreview(); };
+    row.appendChild(field("Max fires (0=forever)", times, "10rem"));
+
+    box.appendChild(row);
+
+    st.changes.forEach((c, ci) => {
+      const line = document.createElement("div");
+      line.className = "chg";
+
+      const sel = document.createElement("select");
+      sel.appendChild(new Option("— choose what to change —", ""));
+      keys.forEach(k => sel.appendChild(new Option(k.label, k.key)));
+      sel.value = c.key;
+
+      const makeValue = () => {
+        const spec = keys.find(k => k.key === sel.value);
+        let el;
+        if (spec && spec.kind === "bool") {
+          el = document.createElement("select");
+          el.appendChild(new Option("true", "true"));
+          el.appendChild(new Option("false", "false"));
+          if (c.value !== "true" && c.value !== "false") c.value = "true";
+        } else if (spec && spec.kind === "enum" && Array.isArray(spec.options)) {
+          el = document.createElement("select");
+          spec.options.forEach(o => el.appendChild(new Option(o, o)));
+          if (!spec.options.includes(c.value)) c.value = spec.options[0];
+        } else {
+          el = document.createElement("input");
+          el.type = "text";
+          el.placeholder = "value";
+        }
+        el.value = c.value;
+        el.onchange = () => { c.value = el.value; syncPreview(); };
+        return el;
+      };
+
+      let valueEl = makeValue();
+      sel.onchange = () => {
+        c.key = sel.value;
+        const fresh = makeValue();
+        line.replaceChild(fresh, valueEl);
+        valueEl = fresh;
+        c.value = fresh.value;
+        syncPreview();
+      };
+
+      const del = document.createElement("button");
+      del.textContent = "×";
+      del.title = "remove this change";
+      del.onclick = () => { st.changes.splice(ci, 1); renderSteps(); syncPreview(); };
+
+      line.appendChild(sel);
+      line.appendChild(valueEl);
+      line.appendChild(del);
+      box.appendChild(line);
+    });
+
+    const add = document.createElement("button");
+    add.textContent = "+ change";
+    add.style.marginTop = ".4rem";
+    add.style.padding = ".2rem .5rem";
+    add.style.fontSize = ".78rem";
+    add.onclick = () => { st.changes.push({ key: "", value: "" }); renderSteps(); syncPreview(); };
+    box.appendChild(add);
+
+    host.appendChild(box);
+  });
+
+  if (!scenarioSteps.length) {
+    const empty = document.createElement("p");
+    empty.className = "small muted";
+    empty.textContent = "No steps yet. Add one, or paste a scenario document into the box below.";
+    host.appendChild(empty);
+  }
+}
+
+$("addStep").onclick = () => {
+  scenarioSteps.push({
+    trigger: "at", at: scenarioSteps.length * 10,
+    when: METRICS[0], op: ">=", value: 0,
+    repeat: 0, times: 0,
+    changes: [{ key: "", value: "" }]
+  });
+  renderSteps();
+  syncPreview();
+};
+
+function loadInlineScenario() {
+  const doc = $("scenarioJson").value.trim();
+  if (!doc) {
+    setStatus("Nothing to load - add a step or paste a scenario first.", true);
+    return Promise.reject(new Error("empty scenario"));
+  }
+  return api("/api/scenario/loadinline", {
+    method: "POST",
+    body: JSON.stringify({ scenario: doc })
+  }).then(d => {
+    $("scenarioEditInfo").textContent = d.steps + " steps loaded";
+    setStatus("Scenario loaded: " + d.steps + " steps.");
+    return d;
+  });
+}
+
+$("scenarioLoadInline").onclick = () => loadInlineScenario().catch(fail);
+$("scenarioLoadStart").onclick = () =>
+  loadInlineScenario()
+    .then(() => api("/api/scenario/start", { method: "POST" }))
+    .then(() => setStatus("Scenario loaded and started."))
+    .catch(fail);
 
 // ---------------------------------------------------------------------------
 // Filter builder  (Phase 3.5) — pure client side, no server round trip
@@ -616,9 +1121,21 @@ $("fbSave").onclick = () => {
 // Boot
 // ---------------------------------------------------------------------------
 
-window.addEventListener("resize", drawChart);
+window.addEventListener("resize", () => { drawChart(); redrawAllSparks(); });
+
+applyTheme(currentTheme());
+$("themeBtn").onclick = () => {
+  // auto -> light -> dark -> auto, so "follow the OS" stays reachable.
+  const next = { auto: "light", light: "dark", dark: "auto" }[currentTheme()] || "light";
+  applyTheme(next);
+  setStatus("Theme: " + next + ".");
+};
+
 buildFilter();
 Promise.all([refreshStatus(), refreshModules(), refreshPresets(), refreshProfiles()])
+  // The scenario editor labels its dropdowns from moduleCache, so it can only
+  // be drawn once /api/modules has answered.
+  .then(() => { renderSteps(); syncPreview(); })
   .then(connectStream);
 // The SSE stream carries the live numbers; this only catches state that changes
 // without a stats frame (a profile applied over the pipe API, for instance).

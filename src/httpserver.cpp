@@ -411,6 +411,18 @@ static void routeRequest(SOCKET s, const HttpRequest &req) {
     // Health check is intentionally unauthenticated (Phase 3.4).
     if (path == "/api/health") { sendJson(s, 200, apiHealthJson()); return; }
 
+    // /metrics is unauthenticated for the same reason: a Prometheus scrape is
+    // a read-only counter dump that changes nothing, and every scrape config
+    // in the world expects to reach it without ceremony. Move this below the
+    // isAuthorized() check if you bind to a network the scraper does not own.
+    if (path == "/metrics") {
+        std::string body = apiMetricsText();
+        // Prometheus negotiates on this exact Content-Type.
+        sendResponse(s, 200, "text/plain; version=0.0.4; charset=utf-8",
+                     body.c_str(), (int)body.size(), NULL);
+        return;
+    }
+
     if (!isAuthorized(req)) {
         sendJson(s, 401, "{\"status\":\"error\",\"message\":\"missing or invalid token; "
                          "pass ?token=... or the X-Clumsy-Token header\"}");
@@ -442,8 +454,17 @@ static void routeRequest(SOCKET s, const HttpRequest &req) {
         if (path == "/api/scenario/stop")   { sendJson(s, status, apiScenarioStop(&status));        return; }
         if (path == "/api/pcap/start")      { sendJson(s, status, apiPcapStart(req.body, &status)); return; }
         if (path == "/api/pcap/stop")       { sendJson(s, status, apiPcapStop(&status));            return; }
+        if (path == "/api/apply")           { sendJson(s, status, apiApplyInline(req.body, &status)); return; }
+        if (path == "/api/scenario/loadinline") { sendJson(s, status, apiScenarioLoadInline(req.body, &status)); return; }
+        if (path == "/api/replay/start")    { sendJson(s, status, apiReplayStart(req.body, &status)); return; }
+        if (path == "/api/replay/stop")     { sendJson(s, status, apiReplayStop(&status));          return; }
         if (matchWrapped(path, "/api/profiles/", "/apply", &middle)) {
             std::string resp = apiApplyProfile(middle, &status);
+            sendJson(s, status, resp);
+            return;
+        }
+        if (matchWrapped(path, "/api/profiles/", "/delete", &middle)) {
+            std::string resp = apiDeleteProfile(middle, &status);
             sendJson(s, status, resp);
             return;
         }

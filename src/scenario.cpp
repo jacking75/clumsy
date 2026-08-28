@@ -280,33 +280,19 @@ static void retireStep(ScenarioStep *step, DWORD nowMs) {
 // Public API
 // ---------------------------------------------------------------------------
 
-void scenarioLoad(const char *path) {
-    FILE *f;
-    char *buf;
-    size_t len;
+// Parses a whole scenario document out of memory. `origin` only names the
+// source in log lines. Replaces whatever was loaded before, so a failed parse
+// leaves nSteps at 0 and scenarioIsLoaded() reports the failure honestly.
+static void scenarioParse(const char *buf, const char *origin) {
     const char *p;
     int depth;
 
     nSteps = 0;
 
-    f = fopen(path, "r");
-    if (!f) {
-        INFO("scenario: cannot open '%s'", path);
-        return;
-    }
-
-    buf = (char*)malloc(SCENARIO_BUF_SIZE);
-    if (!buf) { fclose(f); return; }
-
-    len = fread(buf, 1, SCENARIO_BUF_SIZE - 1, f);
-    fclose(f);
-    buf[len] = '\0';
-
     // find opening '['
     p = strchr(buf, '[');
     if (!p) {
-        INFO("scenario: no JSON array found in '%s'", path);
-        free(buf);
+        INFO("scenario: no JSON array found in %s", origin);
         return;
     }
     p++;
@@ -333,9 +319,41 @@ void scenarioLoad(const char *path) {
         }
     }
 
-    free(buf);
     sortSteps();
-    INFO("scenario: loaded %d steps from '%s'", nSteps, path);
+    INFO("scenario: loaded %d steps from %s", nSteps, origin);
+}
+
+void scenarioLoad(const char *path) {
+    FILE *f;
+    char *buf;
+    size_t len;
+    char origin[MSG_BUFSIZE];
+
+    nSteps = 0;
+
+    f = fopen(path, "r");
+    if (!f) {
+        INFO("scenario: cannot open '%s'", path);
+        return;
+    }
+
+    buf = (char*)malloc(SCENARIO_BUF_SIZE);
+    if (!buf) { fclose(f); return; }
+
+    len = fread(buf, 1, SCENARIO_BUF_SIZE - 1, f);
+    fclose(f);
+    buf[len] = '\0';
+
+    snprintf(origin, sizeof(origin), "'%.400s'", path);
+    scenarioParse(buf, origin);
+    free(buf);
+}
+
+// Same parser fed from memory: the dashboard composes a scenario and posts it
+// without needing a writable path anywhere on the machine.
+void scenarioLoadString(const char *json) {
+    if (!json) { nSteps = 0; return; }
+    scenarioParse(json, "the control API");
 }
 
 void scenarioStart(void) {
