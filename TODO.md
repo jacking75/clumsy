@@ -56,10 +56,11 @@ Phase 4(리눅스)를 마지막에 두는 이유: 사용자 지정 사항이며,
 - [x] 4.2 리눅스 캡처 백엔드 구현 (libnetfilter_queue)
 - [x] 4.3 필터 언어 계층 분리
 - [x] 4.4 권한 처리 (capability 기반)
-- [x] 4.5 빌드 시스템 (genie.lua 리눅스 네이티브 타겟, gcc16)
+- [x] 4.5 빌드 시스템 (리눅스 네이티브 빌드, gcc16)
 - [x] 4.6 배포 문서화
 - [x] 4.7 완료 확인
 - [x] 4.8 선택 과제 (auto-iptables, 제어 소켓, IPv6 복제, 패키징)
+- [x] 4.9 미사용 자산 및 MinGW 빌드 경로 제거
 
 ---
 
@@ -567,11 +568,42 @@ Fedora/RHEL에서의 첫 빌드를 검증으로 삼아야 합니다.
 
 ---
 
+### 4.9 정리 — 완료 (2026-08-28)
+
+사용자 지시로 미사용 자산과 MinGW 빌드 경로를 제거했습니다.
+
+**삭제**
+
+| 대상 | 사유 |
+|------|------|
+| `external/iup-*` 4개 디렉토리 (약 48MB) | Phase 2에서 IUP를 제거한 뒤 어떤 빌드 파일도 참조하지 않음 |
+| `genie.lua` | MinGW를 빼고 나면 남는 역할은 VS 프로젝트 생성뿐인데, `msvc/clumsy.vcxproj`가 이미 수동 관리됨. 소스 추가 시 3곳을 동기화해야 하는 부담만 남았음 |
+| `scripts/` (4개) | nmap ncat 실행 경로가 하드코딩된 수동 테스트 헬퍼. 어느 문서도 참조하지 않으며 `tests/`가 대체 |
+| `clumsy-demo.gif` (190KB) | 제거된 GUI를 보여주는 데모. 참조하는 문서 없음 |
+| `etc/clumsy.manifest` | 32비트용. `.rc`는 `clumsy64.manifest`만 참조하고 프로젝트는 x64 전용 |
+| `etc/clumsy-icon.png` | 어디서도 참조하지 않음 (`.rc`는 `.ico`만 사용) |
+
+**MinGW 빌드 경로 제거**
+
+- `common.h`의 `__MINGW32__` 분기 2곳 삭제. `INLINE_FUNCTION`은 `_MSC_VER` 기준으로 단순화.
+  POSIX 쪽 `Interlocked*`는 `platform.h`가 이미 제공하므로 중복이었습니다.
+- README의 MinGW/GENie 빌드 절, CLAUDE.md·CODING_STYLE.md의 MinGW 언급 정리.
+- **빌드 정의가 둘로 정리되었습니다**: Windows `msvc/clumsy.vcxproj`, 리눅스 `Makefile`.
+
+**부수적으로 고친 것**
+
+`msvc/clumsy.vcxproj.filters`가 존재하지 않는 `.c` 파일 21개를 참조하는 상태였습니다
+(Phase 1의 확장자 전환 때 놓친 파일). 실제 소스 목록에서 재생성했습니다 — 빌드에는
+영향이 없지만 Visual Studio 솔루션 탐색기에 깨진 항목이 보이던 문제입니다.
+
+**검증**: Windows Debug/Release 경고 0개, 리눅스 make 경고 0개, 계약 테스트 16항목,
+`.deb` 빌드까지 모두 정상. 워킹 트리 약 50MB → 1.9MB.
+
+---
+
 **여전히 남은 항목**
 - `.rpm` 실제 빌드 검증 (rpm 툴체인 있는 환경 필요)
-- MinGW(clang) 빌드 검증 (개발 환경 미설치)
 - Windows 실패킷 캡처 경로 회귀 (관리자 권한 콘솔 필요)
-- `external/iup-*` 4개 디렉토리(약 48MB) 삭제 여부 — 어떤 빌드 파일도 참조하지 않음
 
 ---
 

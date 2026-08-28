@@ -41,8 +41,9 @@ Linux 전용
   `platform.h`가 POSIX에서도 제공하므로 **그대로 쓰면 됩니다.** `std::atomic`이나
   `std::thread`로 바꾸지 마세요 — 기존 코드는 컴파일러만 바꾼다는 원칙
   ([docs/CODING_STYLE.md](docs/CODING_STYLE.md) 1절) 대상입니다.
-- 리눅스 빌드는 `Makefile`이 실제로 테스트되는 경로입니다. 소스를 추가하면
-  `Makefile`, `msvc/clumsy.vcxproj`, (해당되면) `genie.lua`를 모두 갱신하세요.
+- 빌드 정의는 **둘뿐**입니다: Windows는 `msvc/clumsy.vcxproj`, 리눅스는 `Makefile`.
+  소스 파일을 추가하면 해당 플랫폼 것만 갱신하면 됩니다
+  (`msvc/clumsy.vcxproj.filters`는 IDE 표시용이라 같이 갱신해두면 좋습니다).
 
 ### 캡처 백엔드 경계 (Phase 4.1)
 
@@ -186,13 +187,13 @@ WinDivertRecv()
 ## 빌드 주의사항 (개발자)
 
 - 언어는 **C++23**입니다. MSVC는 `stdcpp23` + `/utf-8`(한글 주석의 C4819 경고 방지),
-  MinGW/clang은 `--std=c++23`을 사용합니다. 플랫폼 툴셋은 `v145`(VS2026).
+  리눅스는 `g++-16 --std=c++23`을 사용합니다. 플랫폼 툴셋은 `v145`(VS2026).
+  MinGW/clang 빌드는 지원하지 않습니다.
 - Debug/Release 모두 **ConsoleApp**입니다. `LOG()`는 항상 컴파일되지만 런타임 플래그
   `logVerbose`로 게이팅되며(Debug 기본 on, Release 기본 off, `--verbose on|off`로 변경),
   `INFO()`는 항상 출력됩니다.
 - 콘솔에 출력되는 **문자열 리터럴은 ASCII만** 사용합니다. Windows 콘솔은 사용자 OEM
   코드페이지(한국어 환경은 949)로 동작하므로 UTF-8 em-dash 등은 깨집니다. 주석은 UTF-8 자유.
-- `MinGW32` 빌드 시 `InterlockedXxx16` 함수를 GCC atomic builtin으로 대체 (`common.h`)
 - 외부 의존성은 WinDivert 하나뿐입니다. HTTP 서버/JSON 파서/pcap 라이터/웹 UI는 자체 구현이며,
   이 방침의 근거는 [TODO.md](TODO.md) 부록 A와 [docs/CODING_STYLE.md](docs/CODING_STYLE.md)에 있습니다.
 - 리눅스 개발은 **WSL2(Ubuntu 24.04) + g++-16**에서 합니다. 빌드·권한·iptables 연동·플랫폼
@@ -218,7 +219,7 @@ WinDivertRecv()
 3. `common.h` 에 `extern Module <name>Module;` 선언 추가
 4. `main.cpp` 의 `modules[]` 배열에 추가 (처리 순서 결정)
 5. `MODULE_CNT` 값 증가 (`common.h`)
-6. `msvc/clumsy.vcxproj`의 `ClCompile` 목록에 추가 (genie.lua는 `src/**.cpp` 글롭이라 자동)
+6. `msvc/clumsy.vcxproj`의 `ClCompile` 목록과 `Makefile`의 `SOURCES`에 추가
 
 패킷 방향은 `pac->meta.outbound`로 판별하고, 페이로드 조작이 필요하면 위의 백엔드 중립
 헬퍼를 쓰세요. `windivert.h`를 include하는 순간 리눅스 빌드가 깨집니다.

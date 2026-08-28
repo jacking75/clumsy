@@ -1,10 +1,13 @@
 <?xml version="1.0" encoding="utf-8"?>
 <Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
 
+  <!-- Generated from clumsy.vcxproj. Purely cosmetic: it controls how
+       Visual Studio groups the files in Solution Explorer. -->
+
   <ItemGroup>
     <Filter Include="Source Files">
       <UniqueIdentifier>{4FC737F1-C7A5-4376-A066-2A32D752A2FF}</UniqueIdentifier>
-      <Extensions>c;cpp</Extensions>
+      <Extensions>cpp</Extensions>
     </Filter>
     <Filter Include="Source Files\Modules">
       <UniqueIdentifier>{A1B2C3D4-1111-2222-3333-444455556666}</UniqueIdentifier>
@@ -22,77 +25,104 @@
     </Filter>
   </ItemGroup>
 
-  <!-- Core -->
   <ItemGroup>
-    <ClCompile Include="$(ProjectRoot)src\main.c">
+    <ClCompile Include="$(ProjectRoot)src\main.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="$(ProjectRoot)src\divert.c">
+    <ClCompile Include="$(ProjectRoot)src\divert.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="$(ProjectRoot)src\packet.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="$(ProjectRoot)src\elevate.cpp">
       <Filter>Source Files\Infrastructure</Filter>
     </ClCompile>
-    <ClCompile Include="$(ProjectRoot)src\packet.c">
+    <ClCompile Include="$(ProjectRoot)src\utils.cpp">
       <Filter>Source Files\Infrastructure</Filter>
     </ClCompile>
-    <ClCompile Include="$(ProjectRoot)src\elevate.c">
+    <ClCompile Include="$(ProjectRoot)src\lag.cpp">
+      <Filter>Source Files\Modules</Filter>
+    </ClCompile>
+    <ClCompile Include="$(ProjectRoot)src\jitter.cpp">
+      <Filter>Source Files\Modules</Filter>
+    </ClCompile>
+    <ClCompile Include="$(ProjectRoot)src\drop.cpp">
+      <Filter>Source Files\Modules</Filter>
+    </ClCompile>
+    <ClCompile Include="$(ProjectRoot)src\burstloss.cpp">
+      <Filter>Source Files\Modules</Filter>
+    </ClCompile>
+    <ClCompile Include="$(ProjectRoot)src\blackout.cpp">
+      <Filter>Source Files\Modules</Filter>
+    </ClCompile>
+    <ClCompile Include="$(ProjectRoot)src\throttle.cpp">
+      <Filter>Source Files\Modules</Filter>
+    </ClCompile>
+    <ClCompile Include="$(ProjectRoot)src\duplicate.cpp">
+      <Filter>Source Files\Modules</Filter>
+    </ClCompile>
+    <ClCompile Include="$(ProjectRoot)src\ood.cpp">
+      <Filter>Source Files\Modules</Filter>
+    </ClCompile>
+    <ClCompile Include="$(ProjectRoot)src\tamper.cpp">
+      <Filter>Source Files\Modules</Filter>
+    </ClCompile>
+    <ClCompile Include="$(ProjectRoot)src\reset.cpp">
+      <Filter>Source Files\Modules</Filter>
+    </ClCompile>
+    <ClCompile Include="$(ProjectRoot)src\bandwidth.cpp">
+      <Filter>Source Files\Modules</Filter>
+    </ClCompile>
+    <ClCompile Include="$(ProjectRoot)src\pipe.cpp">
       <Filter>Source Files\Infrastructure</Filter>
     </ClCompile>
-    <ClCompile Include="$(ProjectRoot)src\utils.c">
+    <ClCompile Include="$(ProjectRoot)src\statslog.cpp">
       <Filter>Source Files\Infrastructure</Filter>
     </ClCompile>
-    <ClCompile Include="$(ProjectRoot)src\pipe.c">
+    <ClCompile Include="$(ProjectRoot)src\procfilter.cpp">
       <Filter>Source Files\Infrastructure</Filter>
     </ClCompile>
-    <ClCompile Include="$(ProjectRoot)src\statslog.c">
+    <ClCompile Include="$(ProjectRoot)src\scenario.cpp">
       <Filter>Source Files\Infrastructure</Filter>
     </ClCompile>
-    <ClCompile Include="$(ProjectRoot)src\procfilter.c">
+    <ClCompile Include="$(ProjectRoot)src\profile.cpp">
       <Filter>Source Files\Infrastructure</Filter>
     </ClCompile>
-    <ClCompile Include="$(ProjectRoot)src\scenario.c">
+    <ClCompile Include="$(ProjectRoot)src\json.cpp">
       <Filter>Source Files\Infrastructure</Filter>
     </ClCompile>
-    <ClCompile Include="$(ProjectRoot)src\profile.c">
+    <ClCompile Include="$(ProjectRoot)src\controlapi.cpp">
       <Filter>Source Files\Infrastructure</Filter>
     </ClCompile>
-
-    <!-- Modules -->
-    <ClCompile Include="$(ProjectRoot)src\lag.c">
-      <Filter>Source Files\Modules</Filter>
+    <ClCompile Include="$(ProjectRoot)src\httpserver.cpp">
+      <Filter>Source Files\Infrastructure</Filter>
     </ClCompile>
-    <ClCompile Include="$(ProjectRoot)src\jitter.c">
-      <Filter>Source Files\Modules</Filter>
+    <ClCompile Include="$(ProjectRoot)src\pcapexport.cpp">
+      <Filter>Source Files\Infrastructure</Filter>
     </ClCompile>
-    <ClCompile Include="$(ProjectRoot)src\drop.c">
-      <Filter>Source Files\Modules</Filter>
+    <ClCompile Include="$(ProjectRoot)src\report.cpp">
+      <Filter>Source Files\Infrastructure</Filter>
     </ClCompile>
-    <ClCompile Include="$(ProjectRoot)src\burstloss.c">
-      <Filter>Source Files\Modules</Filter>
+    <ClCompile Include="$(ProjectRoot)src\plugin.cpp">
+      <Filter>Source Files\Infrastructure</Filter>
     </ClCompile>
-    <ClCompile Include="$(ProjectRoot)src\blackout.c">
-      <Filter>Source Files\Modules</Filter>
-    </ClCompile>
-    <ClCompile Include="$(ProjectRoot)src\throttle.c">
-      <Filter>Source Files\Modules</Filter>
-    </ClCompile>
-    <ClCompile Include="$(ProjectRoot)src\duplicate.c">
-      <Filter>Source Files\Modules</Filter>
-    </ClCompile>
-    <ClCompile Include="$(ProjectRoot)src\ood.c">
-      <Filter>Source Files\Modules</Filter>
-    </ClCompile>
-    <ClCompile Include="$(ProjectRoot)src\tamper.c">
-      <Filter>Source Files\Modules</Filter>
-    </ClCompile>
-    <ClCompile Include="$(ProjectRoot)src\reset.c">
-      <Filter>Source Files\Modules</Filter>
-    </ClCompile>
-    <ClCompile Include="$(ProjectRoot)src\bandwidth.c">
-      <Filter>Source Files\Modules</Filter>
+    <ClCompile Include="$(ProjectRoot)src\packetutil_win.cpp">
+      <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>
 
   <ItemGroup>
     <ClInclude Include="$(ProjectRoot)src\common.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="$(ProjectRoot)src\json.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="$(ProjectRoot)src\controlapi.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="$(ProjectRoot)src\httpserver.h">
       <Filter>Header Files</Filter>
     </ClInclude>
   </ItemGroup>

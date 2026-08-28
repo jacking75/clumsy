@@ -1,10 +1,8 @@
 # clumsy - Linux native build  (Phase 4.5)
 #
-# genie.lua remains the canonical build definition, but GENie ships as a Windows
-# binary in this repo and building it from source just to compile ~30 files is
-# not worth the extra step. This Makefile is the tested Linux path; keep the two
-# in sync when adding source files (genie.lua globs src/**.cpp, so the only real
-# divergence is the platform-specific file lists below).
+# The only Linux build definition. Windows builds from msvc/clumsy.vcxproj;
+# adding a source file means updating whichever of the two applies (or both,
+# for a file that is not platform specific).
 #
 # Requires:
 #   sudo apt install g++-16 libnetfilter-queue-dev libmnl-dev iptables

@@ -85,7 +85,8 @@ C++로 바뀌어도 동시성 모델은 그대로입니다.
 - 모듈 파라미터는 `volatile short` / `volatile LONG`이며, 쓰기는 항상 `InterlockedExchange16` / `InterlockedExchange`를 씁니다.
 - `process()` 내부에서는 volatile 값을 **한 번만 읽어 지역 변수에 스냅샷**한 뒤 사용합니다. 같은 배치 안에서 값이 바뀌는 것을 막기 위함입니다.
 - `head`/`tail` 패킷 리스트는 divert mutex 안에서만 조작합니다. HTTP 스레드는 이 리스트를 절대 건드리지 않고, 파라미터/플래그만 씁니다.
-- `std::atomic`으로 교체하지 않습니다 — MinGW GCC atomic builtin 대체 매크로(`common.h`)와 이중으로 관리하게 됩니다.
+- `std::atomic`으로 교체하지 않습니다 — `platform.h`가 POSIX에서 같은 의미를 제공하므로
+  이중 관리가 되고, 패킷 핫패스 전체를 건드리게 됩니다.
 
 ## 5. 신규 코드에서의 C++ 사용 범위
 

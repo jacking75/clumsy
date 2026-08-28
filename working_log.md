@@ -1,5 +1,26 @@
 # Working Log
 
+## 2026-08-28 11:10 KST — 미사용 자산 및 MinGW 빌드 경로 제거
+
+- **삭제**: `external/iup-*` 4개 디렉토리(약 48MB, Phase 2에서 IUP 제거 후 미참조),
+  `genie.lua`, `scripts/`(ncat 경로 하드코딩 수동 테스트 헬퍼), `clumsy-demo.gif`(제거된
+  GUI 데모), `etc/clumsy.manifest`(32비트용, .rc는 clumsy64만 참조),
+  `etc/clumsy-icon.png`(미참조).
+- **MinGW 제거**: `common.h`의 `__MINGW32__` 분기 2곳 삭제하고 `INLINE_FUNCTION`을
+  `_MSC_VER` 기준으로 단순화. POSIX 쪽 `Interlocked*`는 `platform.h`가 이미 제공해
+  중복이었습니다. README/CLAUDE.md/CODING_STYLE.md의 MinGW·GENie 언급도 정리.
+- **genie.lua를 지운 판단 근거**: MinGW를 빼면 남는 역할이 VS 프로젝트 생성뿐인데
+  `msvc/clumsy.vcxproj`가 이미 수동 관리 중이라, 소스 추가 시 3곳(vcxproj/Makefile/genie.lua)을
+  동기화해야 하는 부담만 남았습니다. 이제 빌드 정의는 Windows `msvc/clumsy.vcxproj`,
+  리눅스 `Makefile` 둘뿐입니다.
+- **부수적으로 고친 버그**: `msvc/clumsy.vcxproj.filters`가 존재하지 않는 `.c` 파일 21개를
+  참조하고 있었습니다(Phase 1 확장자 전환 때 누락). 실제 소스 목록에서 재생성했습니다.
+  빌드에는 영향이 없지만 VS 솔루션 탐색기에 깨진 항목이 보이던 문제입니다.
+- **검증**: Windows Debug/Release 경고 0개, 리눅스 make 경고 0개, 계약 테스트 16항목 통과,
+  `.deb` 빌드 정상, 실행 파일 정상 동작. 워킹 트리 약 50MB → 1.9MB.
+  (git 히스토리에는 남아 있으므로 리포지토리 용량 자체는 줄지 않습니다.)
+- **남은 항목**: `.rpm` 실제 빌드 검증(툴체인 필요), Windows 실패킷 캡처 회귀(관리자 권한 필요).
+
 ## 2026-08-28 09:49 KST — Phase 4 선택 과제 4건 구현
 
 Phase 4 완료 시 별도 과제로 분리했던 항목들을 이어서 구현했습니다.

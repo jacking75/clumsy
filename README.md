@@ -71,25 +71,7 @@ MSBuild.exe msvc/clumsy.sln -p:Configuration=Release -p:Platform=x64
 | Debug | Console App | 상세 트레이스 로그가 기본 활성화 |
 | Release | Console App | 상태 로그만 출력, `--verbose on`으로 트레이스 활성화 |
 
-### 방법 2: GENie + MinGW (MSYS2/Clang)
-
-**요구사항**:
-- [MSYS2](https://www.msys2.org/) 환경
-- Clang 컴파일러 (`pacman -S mingw-w64-x86_64-clang`)
-- [GENie](https://github.com/bkaradzic/GENie) 빌드 시스템
-
-```bash
-# 1. Makefile 생성
-genie.exe gmake
-
-# 2. 빌드
-cd build
-make config=release_x64
-```
-
-출력 경로: `bin/gmake/Release/x64/clumsy.exe`
-
-### 방법 3: Linux (WSL2 포함)
+### 방법 2: Linux (WSL2 포함)
 
 **요구사항**: g++-16 이상, `libnetfilter-queue-dev`, `libmnl-dev`, `iptables`
 
@@ -107,15 +89,9 @@ make package-deb      # → bin/linux/clumsy_0.4_amd64.deb
 권한 처리와 duplicate 모듈에 주의할 점이 있습니다.
 전부 [docs/LINUX.md](docs/LINUX.md)에 정리되어 있습니다.
 
-### 방법 4: GENie + Visual Studio 프로젝트 생성
-
-GENie로 VS 솔루션을 자동 생성할 수도 있습니다:
-
-```bat
-genie.exe vs2022
-```
-
-생성 경로: `build/clumsy.sln`
+> 빌드 정의는 이 둘뿐입니다: Windows는 `msvc/clumsy.vcxproj`, 리눅스는 `Makefile`.
+> 소스 파일을 추가하면 해당 플랫폼 것만 갱신하면 됩니다.
+> (0.4까지 있던 GENie / MinGW 빌드 경로는 사용하지 않아 제거했습니다.)
 
 
 ## 설정
@@ -327,8 +303,7 @@ clumsy/
 ├── docs/
 │   ├── CODING_STYLE.md # 코드 스타일 원칙
 │   └── LINUX.md        # 리눅스 빌드/실행/제약 가이드
-├── genie.lua           # GENie 빌드 스크립트 (정식 정의)
-├── Makefile            # 리눅스 빌드 (실제 테스트되는 경로)
+├── Makefile            # 리눅스 빌드
 ├── manual.md           # 사용자 매뉴얼 (한국어)
 └── TODO.md             # 개발 로드맵
 ```

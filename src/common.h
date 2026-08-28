@@ -28,38 +28,12 @@
 #define I2S(x) ((short)((x) & 0xFFFF))
 
 
-#ifdef __MINGW32__
-#define INLINE_FUNCTION __inline__
-#else
+// MSVC spells the inline hint __inline; every other compiler clumsy targets
+// takes the standard keyword.
+#if defined(_MSC_VER)
 #define INLINE_FUNCTION __inline
-#endif
-
-
-// my mingw seems missing some of the functions
-// undef all mingw linked interlock* and use __atomic gcc builtins
-// (POSIX builds get these from platform.h instead)
-#ifdef __MINGW32__
-// and 16 seems to be broken
-#ifdef InterlockedAnd16
-#undef InterlockedAnd16
-#endif
-#define InterlockedAnd16(p, val) (__atomic_and_fetch((short*)(p), (val), __ATOMIC_SEQ_CST))
-
-#ifdef InterlockedExchange16
-#undef InterlockedExchange16
-#endif
-#define InterlockedExchange16(p, val) (__atomic_exchange_n((short*)(p), (val), __ATOMIC_SEQ_CST))
-
-#ifdef InterlockedIncrement16
-#undef InterlockedIncrement16
-#endif
-#define InterlockedIncrement16(p) (__atomic_add_fetch((short*)(p), 1, __ATOMIC_SEQ_CST))
-
-#ifdef InterlockedDecrement16
-#undef InterlockedDecrement16
-#endif
-#define InterlockedDecrement16(p) (__atomic_sub_fetch((short*)(p), 1, __ATOMIC_SEQ_CST))
-
+#else
+#define INLINE_FUNCTION inline
 #endif
 
 

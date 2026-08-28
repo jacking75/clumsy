@@ -76,8 +76,7 @@ make clean
 빌드 결과물 옆에 `config.json`과 `web/index.html`이 자동 복사됩니다.
 clumsy는 이 파일들을 **실행 파일과 같은 디렉토리에서** 찾으므로, 옮길 때는 함께 옮기세요.
 
-> `genie.lua`가 여전히 정식 빌드 정의이지만 GENie 바이너리가 Windows 전용이라,
-> 리눅스에서 실제로 테스트되는 경로는 이 `Makefile`입니다. 소스 파일을 추가하면 양쪽 모두 갱신하세요.
+> 리눅스 빌드 정의는 이 `Makefile` 하나뿐입니다. Windows는 `msvc/clumsy.vcxproj`를 씁니다.
 
 ---
 

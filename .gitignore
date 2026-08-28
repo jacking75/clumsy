@@ -1,13 +1,8 @@
 bin
-build
 *.swp
 etc/clumsy.aps
-obj_vs
 obj_msvc
-obj_ninja
-obj_gmake
 obj_linux
-robolog.txt
 
 # Linux build artifacts
 *.o
