@@ -60,3 +60,30 @@ sudo iptables -D OUTPUT -p udp --dport 9999 -j NFQUEUE --queue-num 0   # 반드�
 
 WSL2 Ubuntu 24.04(커널 6.18.35.2)에서 네 모드 모두 검증 완료. 자세한 결과는
 [TODO.md](../TODO.md)의 "4.0 WSL2 개발 환경" 절 참조.
+
+## `windows/capture_test.ps1` — Windows 실캡처 회귀 테스트
+
+**관리자 권한이 필요합니다** (WinDivert 드라이버). 실행하면 UAC 창이 한 번 뜨고,
+승인 후 나머지는 REST API로 자동 진행됩니다. 소요 시간 약 1분.
+
+```bat
+MSBuild msvc\clumsy.vcxproj /p:Configuration=Release /p:Platform=x64
+powershell -ExecutionPolicy Bypass -File tests\windows\capture_test.ps1
+```
+
+검증 항목 23개 — 드라이버 오픈, 무손상 통과, `captured`/`sent` 카운터,
+drop 100%, lag 지연 실측, tamper(체크섬 재계산 포함), duplicate 배수,
+bandwidth 스로틀링, pcap 헤더, 정상 종료.
+
+**설계 메모 두 가지** (같은 함정을 다시 밟지 않도록):
+
+1. 수신 소켓은 **보내기 전에 메인 런스페이스에서 바인딩**합니다. 초기 버전은 수신자를
+   `Start-Job`으로 띄웠는데, 잡이 바인딩을 마치기 전에 송신이 시작돼 아무것도 측정하지
+   못했습니다. 유일하게 패킷을 받은 게 lag 케이스였는데, clumsy가 400ms 지연시킨 덕분에
+   잡이 준비될 시간이 생겼던 것뿐이었습니다.
+2. 지연은 **패킷 1개**로 측정합니다. 버스트의 패킷 간 간격이 수치를 뭉갭니다.
+
+**bandwidth 테스트에 큰 부하를 쓰는 이유**: 토큰 버킷이
+`max(65535, limit*1024*2)` 바이트로 시작하므로 작은 버스트는 설계상 그대로 통과합니다.
+120×1400B = 164KB로 64KB 버킷을 넘겨야 상한이 관측됩니다. 20패킷 테스트는
+"스로틀링 없음"으로 나오는데 이는 결함이 아니라 부하 부족입니다.

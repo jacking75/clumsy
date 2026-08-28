@@ -298,8 +298,9 @@ clumsy/
 ├── external/           # 외부 라이브러리 (WinDivert, Windows 전용)
 ├── packaging/          # .deb / .rpm 패키징 정의
 ├── tests/              # 독립 실행 검증 프로그램
-│   ├── packetutil_test.cpp   # 패킷 헬퍼 계약 테스트 (양 플랫폼 공용)
-│   └── linux/nfqtest.cpp     # NFQUEUE 능력 프로브
+│   ├── packetutil_test.cpp        # 패킷 헬퍼 계약 테스트 (양 플랫폼 공용)
+│   ├── windows/capture_test.ps1   # Windows 실캡처 회귀 (관리자 권한 필요)
+│   └── linux/nfqtest.cpp          # NFQUEUE 능력 프로브
 ├── docs/
 │   ├── CODING_STYLE.md # 코드 스타일 원칙
 │   └── LINUX.md        # 리눅스 빌드/실행/제약 가이드
