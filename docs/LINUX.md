@@ -52,8 +52,12 @@ sudo apt-get install -f          # 의존성이 빠졌을 때만
 
 ```bash
 make package-deb     # → bin/linux/clumsy_0.4_amd64.deb
-make package-rpm     # rpmbuild 필요
+make package-rpm     # → obj_linux/rpmbuild/RPMS/x86_64/clumsy-0.4-1.x86_64.rpm
 ```
+
+> `.rpm` 스펙의 `BuildRequires`는 Fedora 패키지 이름을 씁니다. Debian/Ubuntu에서 스펙만
+> 검증하려면 `make package-rpm RPM_NODEPS=1`로 의존성 검사를 건너뛰세요
+> (라이브러리는 설치되어 있어도 rpm DB가 Fedora 이름을 모르기 때문입니다).
 
 패키지 없이 설치하려면 `sudo make install PREFIX=/usr/local`도 가능합니다.
 

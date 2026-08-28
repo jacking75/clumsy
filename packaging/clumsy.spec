@@ -5,10 +5,9 @@
 # or by hand:
 #   rpmbuild -bb --define "_topdir $(pwd)/rpmbuild" packaging/clumsy.spec
 #
-# Note: unlike the .deb, this spec has not been build-tested in this repository -
-# no rpm toolchain was available on the development machine. It follows the same
-# layout as the deb package and is expected to work, but treat the first build on
-# a Fedora/RHEL host as verification.
+# Build-verified with rpmbuild 4.18.2. Note that BuildRequires uses Fedora package
+# names, so on a non-RPM distro (verifying the spec from Debian/Ubuntu) the
+# dependency check has to be skipped:  make package-rpm RPM_NODEPS=1
 
 Name:           clumsy
 Version:        0.4
@@ -57,10 +56,12 @@ install -D -m 0644 docs/LINUX.md           %{buildroot}%{_docdir}/clumsy/LINUX.m
 install -D -m 0644 README.md               %{buildroot}%{_docdir}/clumsy/README.md
 
 # clumsy resolves config.json and web/ relative to its own executable, so the
-# shared data has to be reachable from %{_bindir}.
+# shared data has to be reachable from %{_bindir}. Relative symlinks, not
+# absolute: rpm warns about absolute ones, and only relative links resolve
+# correctly when the package is installed into an alternate root.
 mkdir -p %{buildroot}%{_bindir}/web
-ln -sf %{_datadir}/clumsy/web/index.html   %{buildroot}%{_bindir}/web/index.html
-ln -sf %{_datadir}/clumsy/config.json      %{buildroot}%{_bindir}/config.json
+ln -sf ../share/clumsy/config.json      %{buildroot}%{_bindir}/config.json
+ln -sf ../../share/clumsy/web/index.html %{buildroot}%{_bindir}/web/index.html
 
 %post
 # Same rationale as the deb postinst: file capabilities rather than setuid root.

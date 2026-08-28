@@ -13,7 +13,8 @@
 #   make test         build and run the packet helper conformance test
 #   make install      install to $(PREFIX)/bin (default /usr/local)
 #   make package-deb  build a .deb into bin/linux/
-#   make package-rpm  build an .rpm (needs rpmbuild)
+#   make package-rpm  build an .rpm (needs rpmbuild; add RPM_NODEPS=1 to verify
+#                     the spec from a non-RPM distro such as Debian/Ubuntu)
 #   make clean
 
 # make predefines CXX=g++, so ?= would never take effect; only override the
@@ -149,19 +150,23 @@ package-deb: $(TARGET)
 	install -m 0644 etc/config.json etc/config.txt etc/scenario-example.json 	    $(PKGDIR)/usr/share/clumsy/
 	install -m 0644 etc/web/index.html $(PKGDIR)/usr/share/clumsy/web/
 	install -m 0644 docs/LINUX.md README.md $(PKGDIR)/usr/share/doc/clumsy/
-	ln -sf /usr/share/clumsy/config.json     $(PKGDIR)/usr/bin/config.json
-	ln -sf /usr/share/clumsy/web/index.html  $(PKGDIR)/usr/bin/web/index.html
+	ln -sf ../share/clumsy/config.json       $(PKGDIR)/usr/bin/config.json
+	ln -sf ../../share/clumsy/web/index.html $(PKGDIR)/usr/bin/web/index.html
 	chmod 0755 $(PKGDIR)/DEBIAN
 	dpkg-deb --build --root-owner-group $(PKGDIR) $(BINDIR)/clumsy_$(VERSION)_$(DEBARCH).deb
 	rm -rf $(PKGDIR)
 	@echo "built $(BINDIR)/clumsy_$(VERSION)_$(DEBARCH).deb"
 
+# RPM_NODEPS=1 skips the BuildRequires check. Needed only when verifying the spec
+# from a non-RPM distro, where the rpm database does not know the Fedora package
+# names even though the libraries are installed.
+RPMFLAGS := $(if $(RPM_NODEPS),--nodeps,)
 package-rpm:
-	@command -v rpmbuild >/dev/null || { echo "rpmbuild not found (install rpm-build)"; exit 1; }
+	@command -v rpmbuild >/dev/null || { echo "rpmbuild not found (install rpm-build, or rpm on Debian)"; exit 1; }
 	rm -rf $(OBJDIR)/rpmbuild
 	mkdir -p $(OBJDIR)/rpmbuild/SOURCES
 	git archive --format=tar.gz --prefix=clumsy-$(VERSION)/ 	    -o $(OBJDIR)/rpmbuild/SOURCES/clumsy-$(VERSION).tar.gz HEAD
-	rpmbuild -bb --define "_topdir $(CURDIR)/$(OBJDIR)/rpmbuild" packaging/clumsy.spec
+	rpmbuild -bb $(RPMFLAGS) --define "_topdir $(CURDIR)/$(OBJDIR)/rpmbuild" packaging/clumsy.spec
 	@echo "rpm(s) under $(OBJDIR)/rpmbuild/RPMS/"
 
 clean:
