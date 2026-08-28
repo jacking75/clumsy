@@ -1,5 +1,33 @@
 # Working Log
 
+## 2026-08-28 14:43 KST — README 영문화 + 가이드에 설치 위치 안내 추가
+
+- `README.md`를 영어로 전면 번역하고, 기존 한국어 원문은 `README_kr.md`로 분리 보존.
+  두 파일 상단에 상호 언어 전환 링크(`**Language**: English | [한국어](README_kr.md)`,
+  역방향)를 추가. 표·코드블록·경로·명령어는 그대로 유지하고 설명 텍스트만 번역.
+- `docs/guide.html` 소개(#intro) 섹션에 "클라이언트에 설치할까요, 서버에 설치할까요?"
+  단락을 추가. clumsy는 설치된 PC의 트래픽만 가로채므로 클라이언트/서버 중 한쪽에만
+  설치하면 되고, 양쪽 다 필요한 경우는 서로 다른 문제를 동시에 재현할 때뿐이라는 점,
+  로컬 개발(loopback) 시나리오, WSL2에서는 호스트 트래픽을 건드릴 수 없다는 주의사항을
+  카드+콜아웃으로 정리.
+
+## 2026-08-28 14:33 KST — 초보자용 HTML 가이드 작성 (docs/guide.html)
+
+- `docs/guide.html` 단일 파일로 초보자용 사용 설명서 작성. 외부 CDN/이미지 없이
+  CSS·SVG 애니메이션만으로 구성, 다크모드는 대시보드와 동일한 자동/라이트/다크
+  3단 토글(localStorage 저장)로 구현.
+- 12개 모듈(Lag/Jitter/Drop/Burst Loss/Blackout/Throttle/Duplicate/Out of
+  Order/Tamper/Corrupt/Reset/Bandwidth) 전부를 카테고리 필터가 붙은 카드로 정리,
+  각 카드에 효과를 보여주는 미니 CSS 애니메이션 데모 + 파라미터 표 + CLI 예시 포함.
+  파라미터 값·기본값·범위는 `main.cpp`/각 모듈 소스/`manual.md`를 Explore 에이전트로
+  대조 검증해 정확성을 확보(특히 `tamper-position`은 manual.md 본문 예시가
+  0=Front 기준과 어긋나 있어 소스 기준값으로 교정).
+- 웹 대시보드 5개 영역을 재현한 HTML/CSS 목업 다이어그램, 아키텍처(가로채기→
+  효과적용→재전송) 다이어그램, 필터·CLI·REST API·Named Pipe·FAQ 섹션과 시나리오
+  10종(빠른 참조표 포함)을 아코디언으로 구성.
+- Chrome으로 실제 렌더링 검증: 라이트/다크 전환, 카테고리 필터, 코드 복사 버튼,
+  nav 스크롤, 12개 모듈 애니메이션 동작을 스크린샷으로 확인. 콘솔 에러 없음.
+
 ## 2026-08-28 13:46 KST — ROADMAP-v2 전체 구현 (T1~T8)
 
 - `docs/ROADMAP-v2.md`의 8개 항목을 모두 구현. 신규 모듈 `corrupt`(비트 에러),
