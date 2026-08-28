@@ -1,5 +1,17 @@
 # Working Log
 
+## 2026-08-28 12:20 KST — gh-pages 삭제 (내 오판 정정)
+
+- 4.11에서 gh-pages를 "실제 서비스 중인 프로젝트 웹사이트"라는 이유로 남겨뒀는데,
+  사용자가 "내가 만든 게 아니라 원본쪽 페이지 아니냐"고 지적해 확인한 결과 **두 가지 모두
+  사실과 달랐습니다.**
+- **소유**: 커밋 31개가 전부 upstream(jagt 23, Chen Tao 6, Ng Yik Phang 2)이고 이 리포지토리
+  소유자 커밋은 0개. 2013~2021년으로 전부 포크 이전. index.html은 소스로 jagt/clumsy를 링크.
+- **서비스 여부**: `gh api repos/jacking75/clumsy/pages` → 404, `jacking75.github.io/clumsy`
+  → HTTP 404. 포크는 GitHub Pages가 자동으로 켜지지 않는데, 이걸 확인하지 않고
+  "서비스 중"이라고 단정한 것이 오판의 원인이었습니다.
+- 백업 번들에 `28912f7`이 보존된 것을 확인한 뒤 원격에서 삭제. 원격 브랜치는 이제 master 하나.
+
 ## 2026-08-28 12:05 KST — Windows 실캡처 회귀 검증 (마지막 미검증 항목)
 
 - 세션 내내 "관리자 권한이 없어 불가"로 남겨뒀던 항목입니다. `Start-Process -Verb RunAs`로
