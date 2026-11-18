@@ -316,6 +316,7 @@ static const char* mimeForPath(const std::string &path) {
     if (ext == ".css")  return "text/css; charset=utf-8";
     if (ext == ".js")   return "application/javascript; charset=utf-8";
     if (ext == ".json") return "application/json; charset=utf-8";
+    if (ext == ".txt")  return "text/plain; charset=utf-8";   // web/llms.txt, llms_kr.txt
     if (ext == ".svg")  return "image/svg+xml";
     if (ext == ".png")  return "image/png";
     if (ext == ".ico")  return "image/x-icon";
@@ -434,6 +435,20 @@ static void serveReport(SOCKET s) {
                  "Content-Disposition: attachment; filename=\"clumsy-report.html\"\r\n");
 }
 
+// Every /api reply is JSON with a "status" member, and that has to include the
+// one a client gets for asking the wrong thing: a script that parses each
+// answer chokes on a bare "Unknown API endpoint", and a language model that
+// guessed GET /api/stop learns nothing from it. The reply names what was
+// asked, the usual reason it missed, and where the real list is.
+static void sendApiNotFound(SOCKET s, const HttpRequest &req) {
+    const char *hint = (req.method == "GET")
+        ? "Actions (filter, stop, quit, modules/{name}, apply, ...) are POST."
+        : "Read-only endpoints (status, modules, stats, ...) are GET.";
+    std::string msg = "no " + req.method + " endpoint at " + req.path + ". " + hint +
+                      " GET /api/docs lists every endpoint with an example body.";
+    sendJson(s, 404, "{\"status\":\"error\",\"message\":\"" + jsonEscape(msg) + "\"}");
+}
+
 static void routeRequest(SOCKET s, const HttpRequest &req) {
     const std::string &path = req.path;
     int status = 200;
@@ -469,7 +484,7 @@ static void routeRequest(SOCKET s, const HttpRequest &req) {
         if (path == "/api/docs")     { sendJson(s, 200, apiDocsJson());     return; }
         if (path == "/api/report")   { serveReport(s);                      return; }
         if (path == "/api/stream")   { serveEventStream(s);                 return; }
-        if (path.compare(0, 5, "/api/") == 0) { sendText(s, 404, "Unknown API endpoint"); return; }
+        if (path.compare(0, 5, "/api/") == 0) { sendApiNotFound(s, req); return; }
         serveStatic(s, path);
         return;
     }
@@ -505,11 +520,15 @@ static void routeRequest(SOCKET s, const HttpRequest &req) {
             sendJson(s, status, resp);
             return;
         }
-        sendText(s, 404, "Unknown API endpoint");
+        sendApiNotFound(s, req);
         return;
     }
 
-    sendText(s, 405, "Method Not Allowed");
+    sendJson(s, 405, "{\"status\":\"error\",\"message\":\"" +
+                     jsonEscape("method " + req.method + " is not supported: clumsy "
+                                "only has GET and POST endpoints (deleting a profile is "
+                                "POST /api/profiles/{name}/delete). See GET /api/docs.") +
+                     "\"}");
 }
 
 // ---------------------------------------------------------------------------

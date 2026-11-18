@@ -6,8 +6,8 @@
 |--------|------|----------------|
 | `packetutil_test.cpp` | 없음 | 백엔드 중립 패킷 헬퍼 4개의 동작 계약 (16 assert) |
 | `latency_test.cpp` | 없음 | 지연 분위수 보간의 정확도 (35 assert) |
-| `linux/api_test.sh` | 없음 | REST 제어 평면 전체 (57 assert) |
-| `windows/api_test.ps1` | 없음 | 같은 내용의 Windows판 (55 assert) |
+| `linux/api_test.sh` | 없음 | REST 제어 평면 전체 + 스크립트/AI 에이전트용 응답 규약 (66 assert) |
+| `windows/api_test.ps1` | 없음 | 같은 내용의 Windows판 (64 assert) |
 | `linux/behaviour_test.sh` | root | 실제 패킷이 정말 바뀌는지 (24 assert) |
 | `windows/capture_test.ps1` | 관리자 | WinDivert 실캡처 회귀 (23 assert) |
 | `linux/nfqtest.cpp` | root | NFQUEUE 능력 프로브 (포팅 전 사전 조사용) |

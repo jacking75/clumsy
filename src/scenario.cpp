@@ -72,6 +72,7 @@ typedef struct {
 
 static ScenarioStep steps[MAX_STEPS];
 static int          nSteps  = 0;
+static int          nSkipped = 0;   // objects dropped at parse time: no trigger
 static DWORD        startMs = 0;
 static int          active  = 0;    // 1 while scenario is running
 static LONG         prevCaptured = 0;
@@ -157,6 +158,10 @@ static int parseObject(const char *p, const char *end, ScenarioStep *step) {
             step->repeatSec = atoi(val);
         } else if (strcmp(key, "times") == 0) {
             step->maxTimes = atoi(val);
+        } else if (key[0] == '_') {
+            // "_comment": JSON has no comment syntax, so a leading underscore
+            // is the convention etc/scenario-example.json uses for notes.
+            // They are not module keys and must not be reported as typos.
         } else if (step->nParams < MAX_PARAMS_PER_STEP) {
             memcpy(step->params[step->nParams].k, key, KEY_SIZE - 1);
             step->params[step->nParams].k[KEY_SIZE - 1] = '\0';
@@ -199,6 +204,24 @@ static void sortSteps(void) {
 // ---------------------------------------------------------------------------
 // Metrics available to condition triggers
 // ---------------------------------------------------------------------------
+
+// Must list exactly what readMetric() answers: it returns 0 for a name it does
+// not know, which makes a mistyped "when" either never fire or fire at once.
+static int isKnownMetric(const char *name) {
+    static const char *const names[] = {
+        "captured_count", "sent_count", "elapsed_sec", "pps",
+        "lag_buf", "jitter_buf", "bandwidth_buf",
+    };
+    for (size_t i = 0; i < sizeof(names) / sizeof(names[0]); ++i) {
+        if (strcmp(name, names[i]) == 0) return 1;
+    }
+    if (strncmp(name, "affected:", 9) == 0) {
+        for (int ix = 0; ix < MODULE_CNT; ++ix) {
+            if (strcmp(modules[ix]->shortName, name + 9) == 0) return 1;
+        }
+    }
+    return 0;
+}
 
 static double readMetric(const char *name, DWORD elapsedMs) {
     if (strcmp(name, "captured_count") == 0) return (double)statsCapturedTotal;
@@ -288,6 +311,7 @@ static void scenarioParse(const char *buf, const char *origin) {
     int depth;
 
     nSteps = 0;
+    nSkipped = 0;
 
     // find opening '['
     p = strchr(buf, '[');
@@ -316,11 +340,80 @@ static void scenarioParse(const char *buf, const char *origin) {
 
         if (parseObject(objStart, p - 1, &steps[nSteps])) {
             nSteps++;
+        } else {
+            nSkipped++;
         }
     }
 
     sortSteps();
     INFO("scenario: loaded %d steps from %s", nSteps, origin);
+}
+
+int scenarioLint(char *buf, int bufSize) {
+    int pos = 0, problems = 0, i, k;
+
+    if (!buf || bufSize <= 0) return 0;
+    buf[0] = '\0';
+
+    if (nSkipped > 0) {
+        pos = appendf(buf, bufSize, pos,
+                      "%d step(s) ignored: each needs an \"at\" or a \"when\" trigger\n",
+                      nSkipped);
+        problems++;
+    }
+
+    for (i = 0; i < nSteps; i++) {
+        const ScenarioStep *step = &steps[i];
+        char where[KEY_SIZE + 16];
+
+        if (step->triggerType == TRIGGER_TIME) {
+            snprintf(where, sizeof(where), "step at=%d", step->atSec);
+        } else {
+            snprintf(where, sizeof(where), "step when=%s", step->whenMetric);
+            if (!isKnownMetric(step->whenMetric)) {
+                pos = appendf(buf, bufSize, pos,
+                              "%s: unknown metric, it always reads 0\n", where);
+                problems++;
+            }
+        }
+        if (step->nParams == 0) {
+            pos = appendf(buf, bufSize, pos, "%s: changes nothing, it has no module keys\n",
+                          where);
+            problems++;
+        }
+
+        for (k = 0; k < step->nParams; k++) {
+            const char *key = step->params[k].k, *val = step->params[k].v;
+            char msg[MSG_BUFSIZE];
+            const ParamSpec *spec;
+            int isModule = 0, ix;
+
+            for (ix = 0; ix < MODULE_CNT; ++ix) {
+                if (strcmp(modules[ix]->shortName, key) == 0) { isModule = 1; break; }
+            }
+            if (isModule) {
+                if (!isBoolWord(val)) {
+                    pos = appendf(buf, bufSize, pos,
+                                  "%s: %s: \"%s\" is not a boolean, use true or false\n",
+                                  where, key, val);
+                    problems++;
+                }
+                continue;
+            }
+            spec = paramSpecFind(key, NULL);
+            if (!spec) {
+                pos = appendf(buf, bufSize, pos, "%s: unknown key \"%s\"\n", where, key);
+                problems++;
+            } else if (paramCheckValue(spec, val, msg, sizeof(msg)) != PARAM_OK) {
+                pos = appendf(buf, bufSize, pos, "%s: %s\n", where, msg);
+                problems++;
+            }
+        }
+    }
+
+    // drop the trailing newline so callers can split on '\n' without an empty tail
+    if (pos > 0 && buf[pos - 1] == '\n') buf[pos - 1] = '\0';
+    return problems;
 }
 
 void scenarioLoad(const char *path) {
@@ -330,6 +423,7 @@ void scenarioLoad(const char *path) {
     char origin[MSG_BUFSIZE];
 
     nSteps = 0;
+    nSkipped = 0;
 
     f = fopen(path, "r");
     if (!f) {
@@ -352,7 +446,7 @@ void scenarioLoad(const char *path) {
 // Same parser fed from memory: the dashboard composes a scenario and posts it
 // without needing a writable path anywhere on the machine.
 void scenarioLoadString(const char *json) {
-    if (!json) { nSteps = 0; return; }
+    if (!json) { nSteps = 0; nSkipped = 0; return; }
     scenarioParse(json, "the control API");
 }
 

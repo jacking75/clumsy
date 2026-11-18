@@ -100,7 +100,7 @@ $(TARGET): $(OBJECTS) | $(BINDIR)
 	$(CXX) $(OBJECTS) -o $@ $(LDFLAGS)
 	@# The dashboard and presets are loaded from next to the executable.
 	@mkdir -p $(BINDIR)/web
-	@cp -f etc/web/index.html $(BINDIR)/web/
+	@cp -f etc/web/index.html etc/web/llms.txt etc/web/llms_kr.txt $(BINDIR)/web/
 	@cp -f etc/config.json etc/config.txt $(BINDIR)/ 2>/dev/null || true
 	@echo "built $@"
 
@@ -139,6 +139,8 @@ PREFIX  ?= /usr/local
 install: $(TARGET)
 	install -D -m 0755 $(TARGET) $(DESTDIR)$(PREFIX)/bin/clumsy
 	install -D -m 0644 etc/web/index.html $(DESTDIR)$(PREFIX)/bin/web/index.html
+	install -D -m 0644 etc/web/llms.txt $(DESTDIR)$(PREFIX)/bin/web/llms.txt
+	install -D -m 0644 etc/web/llms_kr.txt $(DESTDIR)$(PREFIX)/bin/web/llms_kr.txt
 	install -D -m 0644 etc/config.json $(DESTDIR)$(PREFIX)/bin/config.json
 	@echo "installed to $(DESTDIR)$(PREFIX)/bin/clumsy"
 	@echo "grant capabilities with:"
@@ -162,10 +164,12 @@ package-deb: $(TARGET)
 	install -m 0755 packaging/deb/postinst $(PKGDIR)/DEBIAN/postinst
 	install -m 0755 $(TARGET) $(PKGDIR)/usr/bin/clumsy
 	install -m 0644 etc/config.json etc/config.txt etc/scenario-example.json 	    $(PKGDIR)/usr/share/clumsy/
-	install -m 0644 etc/web/index.html $(PKGDIR)/usr/share/clumsy/web/
+	install -m 0644 etc/web/index.html etc/web/llms.txt etc/web/llms_kr.txt $(PKGDIR)/usr/share/clumsy/web/
 	install -m 0644 docs/LINUX.md README.md $(PKGDIR)/usr/share/doc/clumsy/
 	ln -sf ../share/clumsy/config.json       $(PKGDIR)/usr/bin/config.json
 	ln -sf ../../share/clumsy/web/index.html $(PKGDIR)/usr/bin/web/index.html
+	ln -sf ../../share/clumsy/web/llms.txt   $(PKGDIR)/usr/bin/web/llms.txt
+	ln -sf ../../share/clumsy/web/llms_kr.txt $(PKGDIR)/usr/bin/web/llms_kr.txt
 	chmod 0755 $(PKGDIR)/DEBIAN
 	dpkg-deb --build --root-owner-group $(PKGDIR) $(BINDIR)/clumsy_$(VERSION)_$(DEBARCH).deb
 	rm -rf $(PKGDIR)

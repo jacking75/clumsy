@@ -236,6 +236,69 @@ if ($rep -match "Delay distribution") { Ok "report contains the delay distributi
 else { Bad "report missing latency section" "" }
 
 Write-Host ""
+Write-Host "########## 9. replies a script or an AI agent can act on ##########"
+# A wrong path or method must still answer in JSON: a client that parses every
+# reply would otherwise fail on the one reply that tells it what it got wrong.
+$r = Http GET "/api/stop" $null
+if ((Code $r) -eq 404 -and (Body $r) -match '"status":"error"' -and (Body $r) -match 'POST') {
+  Ok "a GET on a POST-only endpoint is a JSON error that says so"
+} else { Bad "unknown endpoint reply is not actionable JSON" (Body $r) }
+
+# Out of range: applied, but the reply has to show the value that is in effect.
+$r = Body (Http POST "/api/modules/lag" '{"lag-time":99999}')
+if ($r -match '"warnings":\[' -and $r -match '"lag-time":"15000"') {
+  Ok "a clamped value is reported, with the value actually in effect"
+} else { Bad "clamping was silent" $r }
+# Unusable: must not be coerced into some other setting and reported as ok.
+[void](Http POST "/api/modules/jitter" '{"jitter-dist":"normal"}')
+$r = Http POST "/api/modules/jitter" '{"jitter-dist":"gaussian"}'
+if ((Code $r) -eq 400 -and (Body $r) -match 'uniform,normal,pareto' -and
+    (Body (Http GET "/api/modules" $null)) -match '"jitter-dist":"normal"') {
+  Ok "an unknown enum name is refused, with the choices, and the old value stays"
+} else { Bad "bad enum value was applied or not reported" (Body $r) }
+[void](Http POST "/api/modules/jitter" '{"jitter-dist":"uniform"}')
+[void](Http POST "/api/modules/lag" '{"lag-time":50}')
+# A request made only of names no module has changed nothing, and "ok" with
+# "applied":0 reads as success to anything that checks the status alone.
+$r = Http POST "/api/apply" '{"latency":150,"loss":5}'
+if ((Code $r) -eq 400 -and (Body $r) -match 'latency') { Ok "a request that applied nothing is a 400 naming the keys" }
+else { Bad "an all-unknown request was reported as ok" ((Code $r).ToString() + " " + (Body $r)) }
+
+# The steps as a real JSON array, which is what a client sends unprompted.
+$r = Body (Http POST "/api/scenario/loadinline" '{"scenario":[{"at":0,"lag":true},{"at":5,"lag":false}]}')
+if ($r -match '"steps":2') { Ok "a scenario sent as a JSON array is accepted" }
+else { Bad "array-form scenario rejected" $r }
+
+# A mistyped scenario key only shows on the console when its step fires, long
+# after the client that loaded it has moved on - so it is reported at load.
+$sc = '[{"at":0,"lag":true,"lag-ms":80}]'
+$r = Body (Http POST "/api/scenario/loadinline" (@{ scenario = $sc } | ConvertTo-Json -Compress))
+if ($r -match '"warnings":\[' -and $r -match 'lag-ms') { Ok "scenario load reports a key no module has" }
+else { Bad "scenario typo went unreported" $r }
+
+# The agent guides are hand-written, so they are the one reference that can
+# drift from the code - and there are two of them, English and Korean, which
+# can also drift from each other. Every parameter the modules publish has to
+# appear in both.
+$mods = Body (Http GET "/api/modules" $null)
+$keys = @([regex]::Matches($mods, '"key":"([a-z-]+)"') | ForEach-Object { $_.Groups[1].Value } |
+          Where-Object { $_ -notmatch '-(inbound|outbound)$' })
+foreach ($doc in @("/llms.txt", "/llms_kr.txt")) {
+  $raw = Http GET $doc $null
+  $guide = Body $raw
+  $missing = @($keys | Where-Object { $guide -notmatch [regex]::Escape($_) })
+  if ((Code $raw) -eq 200 -and $missing.Count -eq 0) { Ok "$doc is served and documents every module parameter" }
+  else { Bad "$doc is missing or incomplete" ("status " + (Code $raw) + "; missing: " + ($missing -join ", ")) }
+}
+
+# The command line is checked before anything starts, so this runs (and fails)
+# while the instance above still holds the single-instance claim.
+$bad = Start-Process -FilePath $exe -WorkingDirectory $dir -PassThru -Wait -WindowStyle Hidden `
+       -ArgumentList "--lag-ms", "100"
+if ($bad.ExitCode -eq 2) { Ok "an unknown command line option exits with code 2" }
+else { Bad "unknown option was accepted" "exit code $($bad.ExitCode)" }
+
+Write-Host ""
 Write-Host "########## shutting down ##########"
 [void](Http POST "/api/quit" "")
 Start-Sleep -Seconds 2

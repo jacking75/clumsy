@@ -10,6 +10,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <string>
+#include <vector>
 
 #include "common.h"
 #include "controlapi.h"
@@ -57,6 +58,57 @@ static Module* findModule(const std::string &shortName) {
         if (shortName == modules[ix]->shortName) return modules[ix];
     }
     return nullptr;
+}
+
+// "lag, jitter, drop, ..." - appended to "unknown module" errors so the caller
+// can correct itself from the reply instead of going to look the names up.
+static std::string moduleNameList() {
+    std::string out;
+    for (int ix = 0; ix < MODULE_CNT; ++ix) {
+        if (ix) out += ", ";
+        out += modules[ix]->shortName;
+    }
+    return out;
+}
+
+static std::string moduleKeyList(const Module *m) {
+    std::string out;
+    for (int i = 0; i < m->paramSpecCount; ++i) {
+        if (i) out += ",";
+        out += m->paramSpecs[i].key;
+    }
+    return out;
+}
+
+// ,"warnings":["...","..."] - or nothing at all when the list is empty, so
+// replies that had nothing to complain about keep their old shape.
+static std::string warningsField(const std::vector<std::string> &warnings) {
+    if (warnings.empty()) return "";
+    std::string out = ",\"warnings\":[";
+    for (size_t i = 0; i < warnings.size(); ++i) {
+        if (i) out += ",";
+        out += quoted(warnings[i]);
+    }
+    out += "]";
+    return out;
+}
+
+static std::vector<std::string> splitLines(const char *text) {
+    std::vector<std::string> out;
+    const char *p = text;
+    while (p && *p) {
+        const char *nl = strchr(p, '\n');
+        out.push_back(nl ? std::string(p, nl - p) : std::string(p));
+        p = nl ? nl + 1 : nullptr;
+    }
+    return out;
+}
+
+// What scenarioLint() has to say about the scenario that was just loaded.
+static std::string scenarioWarningsField() {
+    char lint[4096];
+    if (scenarioLint(lint, sizeof(lint)) == 0) return "";
+    return warningsField(splitLines(lint));
 }
 
 // A module parameter map: {"lag-time":"50","lag-inbound":"true"}
@@ -118,6 +170,7 @@ std::string apiModulesJson() {
         if (ix) out += ",";
         out += "{\"shortName\":" + quoted(m->shortName) +
                ",\"displayName\":" + quoted(m->displayName) +
+               ",\"description\":" + quoted(moduleDescription(m->shortName)) +
                ",\"enabled\":" + std::string(*m->enabledFlag ? "true" : "false") +
                ",\"affected\":" + numToStr(m->affectedCount) +
                ",\"params\":" + moduleParamsJson(m) +
@@ -214,38 +267,123 @@ std::string apiHealthJson() {
            std::string(appIsCapturing() ? "true" : "false") + "}";
 }
 
+// GET /api/docs. A client that has never seen clumsy - a CI script, or a
+// language model told only "there is a clumsy on port 8080" - should be able to
+// drive it from this reply alone, so every entry carries a description and,
+// for POST, a body it can copy. The table is serialized through quoted()
+// rather than kept as one pre-escaped literal: triple-escaped JSON was the
+// reason half of these had no description.
 std::string apiDocsJson() {
-    static const char *docs =
-    "{\"status\":\"ok\",\"endpoints\":["
-    "{\"method\":\"GET\",\"path\":\"/api/health\",\"auth\":false,\"desc\":\"liveness probe\"},"
-    "{\"method\":\"GET\",\"path\":\"/api/status\",\"desc\":\"capture state, filter, last message\"},"
-    "{\"method\":\"GET\",\"path\":\"/api/modules\",\"desc\":\"all modules with values and ParamSpec form metadata\"},"
-    "{\"method\":\"GET\",\"path\":\"/api/stats\",\"desc\":\"live counters\"},"
-    "{\"method\":\"GET\",\"path\":\"/api/stream\",\"desc\":\"Server-Sent Events, one stats frame every 200ms\"},"
-    "{\"method\":\"GET\",\"path\":\"/api/profiles\",\"desc\":\"profile names from profiles.json\"},"
-    "{\"method\":\"GET\",\"path\":\"/api/presets\",\"desc\":\"filter presets from config.json\"},"
-    "{\"method\":\"GET\",\"path\":\"/api/report\",\"desc\":\"HTML session report download\"},"
-    "{\"method\":\"GET\",\"path\":\"/api/docs\",\"desc\":\"this document\"},"
-    "{\"method\":\"POST\",\"path\":\"/api/modules/{shortName}\",\"body\":\"{\\\"enabled\\\":true,\\\"lag-time\\\":100}\"},"
-    "{\"method\":\"POST\",\"path\":\"/api/filter\",\"body\":\"{\\\"filter\\\":\\\"udp and outbound\\\",\\\"process\\\":\\\"game.exe\\\"}\"},"
-    "{\"method\":\"POST\",\"path\":\"/api/stop\",\"desc\":\"stop capture\"},"
-    "{\"method\":\"POST\",\"path\":\"/api/quit\",\"desc\":\"shut clumsy down\"},"
-    "{\"method\":\"POST\",\"path\":\"/api/profiles\",\"body\":\"{\\\"name\\\":\\\"mobile-4g\\\"}\",\"desc\":\"save current state as a profile\"},"
-    "{\"method\":\"POST\",\"path\":\"/api/profiles/{name}/apply\",\"desc\":\"apply a profile\"},"
-    "{\"method\":\"POST\",\"path\":\"/api/presets\",\"body\":\"{\\\"name\\\":\\\"my filter\\\",\\\"filter\\\":\\\"udp\\\"}\"},"
-    "{\"method\":\"POST\",\"path\":\"/api/scenario/load\",\"body\":\"{\\\"path\\\":\\\"scenario.json\\\"}\"},"
-    "{\"method\":\"POST\",\"path\":\"/api/scenario/start\",\"desc\":\"restart scenario playback\"},"
-    "{\"method\":\"POST\",\"path\":\"/api/scenario/stop\",\"desc\":\"halt scenario playback\"},"
-    "{\"method\":\"POST\",\"path\":\"/api/pcap/start\",\"body\":\"{\\\"path\\\":\\\"out.pcap\\\",\\\"maxPackets\\\":0,\\\"maxBytes\\\":0}\"},"
-    "{\"method\":\"POST\",\"path\":\"/api/pcap/stop\",\"desc\":\"close the pcap file\"},"
-    "{\"method\":\"GET\",\"path\":\"/metrics\",\"auth\":false,\"desc\":\"Prometheus text exposition\"},"
-    "{\"method\":\"POST\",\"path\":\"/api/apply\",\"body\":\"{\\\"lag\\\":true,\\\"lag-time\\\":200}\",\"desc\":\"set several modules at once without saving a profile\"},"
-    "{\"method\":\"POST\",\"path\":\"/api/profiles/{name}/delete\",\"desc\":\"remove a profile from profiles.json\"},"
-    "{\"method\":\"POST\",\"path\":\"/api/scenario/loadinline\",\"body\":\"{\\\"scenario\\\":\\\"[{...}]\\\"}\",\"desc\":\"load a scenario from the request body\"},"
-    "{\"method\":\"POST\",\"path\":\"/api/replay/start\",\"body\":\"{\\\"path\\\":\\\"in.pcap\\\",\\\"speed\\\":1.0,\\\"loop\\\":false}\"},"
-    "{\"method\":\"POST\",\"path\":\"/api/replay/stop\",\"desc\":\"halt pcap replay\"}"
-    "]}";
-    return docs;
+    struct Endpoint {
+        const char *method;
+        const char *path;
+        bool        auth;
+        const char *body;   // example request body, or NULL
+        const char *desc;
+    };
+    static const Endpoint endpoints[] = {
+        { "GET",  "/api/health", false, NULL,
+          "liveness probe; poll this after launch until it answers" },
+        { "GET",  "/api/status", true, NULL,
+          "capturing (bool), admin (bool: can this instance capture at all), "
+          "filter, process, last status message" },
+        { "GET",  "/api/modules", true, NULL,
+          "every module: shortName, enabled, current params, and paramSpecs "
+          "(key, type, min, max, options) - the authoritative list of keys" },
+        { "GET",  "/api/stats", true, NULL,
+          "live counters: captured, sent, per-module affected, latency "
+          "percentiles; use it to verify a module is really acting" },
+        { "GET",  "/api/stream", true, NULL,
+          "Server-Sent Events, one stats frame every 200ms; never returns, "
+          "prefer /api/stats from a script" },
+        { "GET",  "/api/profiles", true, NULL, "profile names from profiles.json" },
+        { "GET",  "/api/presets", true, NULL, "named filter expressions from config.json" },
+        { "GET",  "/api/report", true, NULL, "HTML session report download" },
+        { "GET",  "/api/docs", true, NULL, "this document" },
+        { "GET",  "/llms.txt", true, NULL,
+          "plain-text usage guide for AI agents: workflow, filter syntax, safety rules" },
+        { "GET",  "/llms_kr.txt", true, NULL, "the same guide in Korean" },
+        { "GET",  "/metrics", false, NULL, "Prometheus text exposition" },
+        { "POST", "/api/filter", true,
+          "{\"filter\":\"udp and udp.DstPort == 7777\",\"process\":\"game.exe\"}",
+          "start capturing with this filter (restarts if already capturing); "
+          "process is optional; nothing is shaped until this succeeds" },
+        { "POST", "/api/stop", true, NULL,
+          "stop capturing; traffic flows normally again, clumsy keeps running" },
+        { "POST", "/api/quit", true, NULL, "stop capturing and shut clumsy down" },
+        { "POST", "/api/modules/{shortName}", true,
+          "{\"enabled\":true,\"lag-time\":100}",
+          "switch one module on or off and/or set its params; the reply "
+          "carries the resulting params" },
+        { "POST", "/api/apply", true,
+          "{\"lag\":true,\"lag-time\":200,\"drop\":true,\"drop-chance\":5}",
+          "set several modules in one request: a module shortName enables or "
+          "disables it, any other key is a param" },
+        { "POST", "/api/profiles", true, "{\"name\":\"mobile-4g\"}",
+          "save the current module state as a profile" },
+        { "POST", "/api/profiles/{name}/apply", true, NULL, "apply a saved profile" },
+        { "POST", "/api/profiles/{name}/delete", true, NULL,
+          "remove a profile from profiles.json" },
+        { "POST", "/api/presets", true,
+          "{\"name\":\"my filter\",\"filter\":\"udp\"}",
+          "save a named filter expression to config.json" },
+        { "POST", "/api/scenario/loadinline", true,
+          "{\"scenario\":[{\"at\":0,\"lag\":true,\"lag-time\":100},"
+          "{\"at\":30,\"lag\":false}]}",
+          "load a scenario from the body: an array of steps, each with an "
+          "\"at\" (seconds since the capture started) or \"when\" trigger plus "
+          "the same keys /api/apply takes; it plays when a capture starts" },
+        { "POST", "/api/scenario/load", true, "{\"path\":\"scenario.json\"}",
+          "load a scenario file from the machine clumsy runs on" },
+        { "POST", "/api/scenario/start", true, NULL,
+          "restart playback of the loaded scenario (it also starts with each capture)" },
+        { "POST", "/api/scenario/stop", true, NULL, "halt scenario playback" },
+        { "POST", "/api/pcap/start", true,
+          "{\"path\":\"out.pcap\",\"maxPackets\":0,\"maxBytes\":0}",
+          "dump captured packets to a libpcap file (0 = unlimited)" },
+        { "POST", "/api/pcap/stop", true, NULL, "close the pcap file" },
+        { "POST", "/api/replay/start", true,
+          "{\"path\":\"in.pcap\",\"speed\":1.0,\"loop\":false}",
+          "re-inject a saved libpcap file" },
+        { "POST", "/api/replay/stop", true, NULL, "halt pcap replay" },
+    };
+    static const char *const conventions[] = {
+        "Only GET and POST exist. POST bodies are JSON objects.",
+        "Every JSON reply has \"status\": \"ok\" or \"error\"; errors add \"message\".",
+        "A reply can be \"ok\" and still carry \"unknownKeys\" (keys no module "
+        "has) or \"warnings\" (values clamped or not applied). Read both. A "
+        "request that applied nothing at all is an error (400).",
+        "Module settings do nothing until a capture is running: POST /api/filter "
+        "first. \"capturing\": false in a reply means the setting is stored but "
+        "no traffic is being shaped yet.",
+        "Chances are percentages 0..100 (5 means 5%), times are milliseconds, "
+        "bandwidth is kilobytes per second. Booleans may be true/false, "
+        "\"on\"/\"off\" or 1/0.",
+        "No token is needed by default. Only when clumsy was started with "
+        "--web-token or a non-loopback --web-bind, send it as the "
+        "X-Clumsy-Token header or ?token= on every endpoint except those "
+        "marked \"auth\": false.",
+    };
+
+    std::string out = "{\"status\":\"ok\",\"version\":" + quoted(CLUMSY_VERSION) +
+                      ",\"guide\":\"/llms.txt\",\"conventions\":[";
+    for (size_t i = 0; i < sizeof(conventions) / sizeof(conventions[0]); ++i) {
+        if (i) out += ",";
+        out += quoted(conventions[i]);
+    }
+    out += "],\"endpoints\":[";
+    for (size_t i = 0; i < sizeof(endpoints) / sizeof(endpoints[0]); ++i) {
+        const Endpoint &e = endpoints[i];
+        if (i) out += ",";
+        out += "{\"method\":" + quoted(e.method) + ",\"path\":" + quoted(e.path);
+        // Only the exceptions are marked, as before: "auth": true on nearly
+        // every line reads as "a token is required", which by default it is not.
+        if (!e.auth) out += ",\"auth\":false";
+        if (e.body) out += ",\"body\":" + quoted(e.body);
+        out += ",\"desc\":" + quoted(e.desc) + "}";
+    }
+    out += "]}";
+    return out;
 }
 
 // ---------------------------------------------------------------------------
@@ -336,22 +474,63 @@ std::string apiMetricsText() {
 // ---------------------------------------------------------------------------
 
 // Applies every non-meta key in a request object to the module's setParam.
-// Returns the number of parameters that were recognised.
-static int applyModuleObject(const JsonValue &req, Module *mod, std::string *unknownOut) {
+// Returns the number of parameters that were applied. Keys the module does not
+// have go to unknownOut; values that were clamped, or refused outright, are
+// explained in warningsOut. Either may be null for callers that keep the
+// pre-Phase-2 reply shape and have nowhere to put them.
+static int applyModuleObject(const JsonValue &req, Module *mod, std::string *unknownOut,
+                             std::vector<std::string> *warningsOut) {
     int applied = 0;
     if (!mod->setParam || !req.isObject()) return 0;
     for (size_t i = 0; i < req.obj.size(); ++i) {
         const std::string &key = req.obj[i].first;
         if (key == "cmd" || key == "module" || key == "enabled") continue;
         std::string val = req.obj[i].second.asString();
-        if (mod->setParam(key.c_str(), val.c_str())) {
-            applied++;
-        } else if (unknownOut) {
+        char msg[MSG_BUFSIZE];
+        int verdict = applyModuleParamChecked(mod, key.c_str(), val.c_str(), msg, sizeof(msg));
+
+        if (verdict == PARAM_OK || verdict == PARAM_ADJUSTED) applied++;
+        if (verdict == PARAM_UNKNOWN && unknownOut) {
             if (!unknownOut->empty()) *unknownOut += ",";
             *unknownOut += key;
         }
+        if (verdict == PARAM_ADJUSTED && warningsOut) warningsOut->push_back(msg);
+        if (verdict == PARAM_INVALID && warningsOut) {
+            warningsOut->push_back(std::string(msg) + " - not applied");
+        }
     }
     return applied;
+}
+
+// Reads the "enabled" member through the shared boolean vocabulary, so true,
+// "true", "on" and 1 all mean the same thing on every transport. Returns false
+// and leaves the module alone when the value is none of those words.
+static bool applyEnabledField(const JsonValue &req, Module *mod,
+                              std::vector<std::string> *warningsOut) {
+    const JsonValue *en = req.find("enabled");
+    if (!en) return false;
+    std::string word = en->asString();
+    if (!isBoolWord(word.c_str())) {
+        if (warningsOut) {
+            warningsOut->push_back("enabled: \"" + word +
+                                   "\" is not a boolean, use true or false - not applied");
+        }
+        return false;
+    }
+    InterlockedExchange16(mod->enabledFlag, (short)parseBoolValue(word.c_str()));
+    return true;
+}
+
+// The error text for a request that asked for changes and made none. "ok" with
+// "applied":0 reads as success to anything that checks the status alone, and a
+// request made entirely of guessed names ("latency", "loss") is exactly the
+// one whose sender needs to be told it did nothing.
+static std::string nothingAppliedMessage(const std::string &unknown,
+                                         const std::vector<std::string> &warnings) {
+    std::string msg = "nothing was applied.";
+    if (!unknown.empty()) msg += " Unknown keys: " + unknown + ".";
+    for (size_t i = 0; i < warnings.size(); ++i) msg += " " + warnings[i] + ".";
+    return msg;
 }
 
 std::string apiSetModule(const std::string &shortName, const std::string &body,
@@ -359,28 +538,53 @@ std::string apiSetModule(const std::string &shortName, const std::string &body,
     JsonValue req;
     Module *mod = findModule(shortName);
     std::string unknown;
+    std::vector<std::string> warnings;
 
     *httpStatus = 200;
     if (!mod) {
         *httpStatus = 404;
-        return errJson("unknown module: " + shortName);
+        return errJson("unknown module: " + shortName + " (modules: " + moduleNameList() + ")");
     }
     if (!body.empty() && !jsonParse(body, req)) {
         *httpStatus = 400;
         return errJson("malformed JSON body");
     }
 
-    if (const JsonValue *en = req.find("enabled")) {
-        InterlockedExchange16(mod->enabledFlag, (short)(en->asBool() ? 1 : 0));
+    bool enabledApplied = applyEnabledField(req, mod, &warnings);
+    if (enabledApplied) {
         INFO("api: %s %s", shortName.c_str(), *mod->enabledFlag ? "enabled" : "disabled");
     }
-    int applied = applyModuleObject(req, mod, &unknown);
+    int applied = applyModuleObject(req, mod, &unknown, &warnings);
 
+    if (applied == 0 && !enabledApplied && (!unknown.empty() || !warnings.empty())) {
+        *httpStatus = 400;
+        return errJson(nothingAppliedMessage(unknown, warnings) + " " + shortName +
+                       " takes: enabled," + moduleKeyList(mod));
+    }
+
+    // "params" is the state after this request, so a caller can see in the
+    // same reply what a clamped or refused value left behind. "applied" counts
+    // parameters; the switch is reported separately as "enabled".
     std::string extra = "\"module\":" + quoted(shortName) +
                         ",\"applied\":" + numToStr(applied) +
-                        ",\"enabled\":" + std::string(*mod->enabledFlag ? "true" : "false");
-    if (!unknown.empty()) extra += ",\"unknownKeys\":" + quoted(unknown);
+                        ",\"enabled\":" + std::string(*mod->enabledFlag ? "true" : "false") +
+                        ",\"capturing\":" + std::string(appIsCapturing() ? "true" : "false") +
+                        ",\"params\":" + moduleParamsJson(mod);
+    if (!unknown.empty()) {
+        extra += ",\"unknownKeys\":" + quoted(unknown) +
+                 ",\"validKeys\":" + quoted(moduleKeyList(mod));
+    }
+    extra += warningsField(warnings);
     return okJson(extra);
+}
+
+// A refused capture has to leave a trace beyond the one reply that carried it:
+// GET /api/status advertises the last status message and the console is where
+// an operator looks, and both kept saying "Idle." after a failed start.
+static std::string noteCaptureFailure(const char *err) {
+    std::string reason = (err && err[0]) ? err : "failed to start capture";
+    showStatus(("Capture not started: " + reason).substr(0, MSG_BUFSIZE - 1).c_str());
+    return reason;
 }
 
 std::string apiSetFilter(const std::string &body, int *httpStatus) {
@@ -406,7 +610,7 @@ std::string apiSetFilter(const std::string &body, int *httpStatus) {
 
     if (!appStartCapture(filter.c_str(), process.c_str(), err, sizeof(err))) {
         *httpStatus = 400;
-        return errJson(err[0] ? err : "failed to start capture");
+        return errJson(noteCaptureFailure(err));
     }
     return okJson("\"filter\":" + quoted(filter) + ",\"process\":" + quoted(process));
 }
@@ -489,7 +693,7 @@ std::string apiScenarioLoad(const std::string &body, int *httpStatus) {
         *httpStatus = 400;
         return errJson("failed to load scenario: " + path);
     }
-    return okJson("\"steps\":" + numToStr(scenarioStepCount()));
+    return okJson("\"steps\":" + numToStr(scenarioStepCount()) + scenarioWarningsField());
 }
 
 std::string apiScenarioStart(int *httpStatus) {
@@ -499,7 +703,14 @@ std::string apiScenarioStart(int *httpStatus) {
         return errJson("no scenario loaded");
     }
     scenarioStart();
-    return okJson("\"steps\":" + numToStr(scenarioStepCount()));
+    std::string extra = "\"steps\":" + numToStr(scenarioStepCount());
+    // Steps are only ticked while capturing, and starting a capture restarts
+    // the scenario from zero, so without one this call changes nothing yet.
+    if (!appIsCapturing()) {
+        extra += warningsField({ "no capture is running: steps are timed from the capture "
+                                 "start, so none fires until POST /api/filter succeeds" });
+    }
+    return okJson(extra);
 }
 
 std::string apiScenarioStop(int *httpStatus) {
@@ -546,7 +757,8 @@ std::string apiDeleteProfile(const std::string &name, int *httpStatus) {
 // one request. The same shape a profile stores, without saving one.
 std::string apiApplyInline(const std::string &body, int *httpStatus) {
     JsonValue req;
-    std::string unknown;
+    std::string unknown, params;
+    std::vector<std::string> warnings;
     int applied = 0;
 
     *httpStatus = 200;
@@ -556,16 +768,49 @@ std::string apiApplyInline(const std::string &body, int *httpStatus) {
     }
     for (size_t i = 0; i < req.obj.size(); ++i) {
         const std::string &key = req.obj[i].first;
+        // The pipe sends its whole request object here, "cmd" included.
+        if (key == "cmd") continue;
         std::string val = req.obj[i].second.asString();
-        if (applyModuleKV(key.c_str(), val.c_str())) {
+        char msg[MSG_BUFSIZE];
+        int verdict = applyModuleKVChecked(key.c_str(), val.c_str(), msg, sizeof(msg));
+
+        if (verdict == PARAM_OK || verdict == PARAM_ADJUSTED) {
+            // Echo each accepted key with the value now in effect, the same
+            // service "params" does for POST /api/modules/{name}.
+            char now[PARAM_VAL_SIZE];
+            Module *owner = findModule(key);
+            std::string current = val;
+            if (owner) {
+                current = *owner->enabledFlag ? "true" : "false";
+            } else if (paramSpecFind(key.c_str(), &owner) &&
+                       moduleParamCurrent(owner, key.c_str(), now, sizeof(now))) {
+                current = now;
+            }
+            if (!params.empty()) params += ",";
+            params += quoted(key) + ":" + quoted(current);
             applied++;
-        } else {
+        }
+        if (verdict == PARAM_UNKNOWN) {
             if (!unknown.empty()) unknown += ",";
             unknown += key;
         }
+        if (verdict == PARAM_ADJUSTED) warnings.push_back(msg);
+        if (verdict == PARAM_INVALID)  warnings.push_back(std::string(msg) + " - not applied");
     }
-    std::string extra = "\"applied\":" + numToStr(applied);
+
+    if (applied == 0 && (!unknown.empty() || !warnings.empty())) {
+        *httpStatus = 400;
+        return errJson(nothingAppliedMessage(unknown, warnings) +
+                       " A key is a module name (" + moduleNameList() +
+                       ") to switch it on or off, or one of its parameters; "
+                       "GET /api/modules lists them.");
+    }
+
+    std::string extra = "\"applied\":" + numToStr(applied) +
+                        ",\"capturing\":" + std::string(appIsCapturing() ? "true" : "false") +
+                        ",\"params\":{" + params + "}";
     if (!unknown.empty()) extra += ",\"unknownKeys\":" + quoted(unknown);
+    extra += warningsField(warnings);
     return okJson(extra);
 }
 
@@ -576,17 +821,31 @@ std::string apiScenarioLoadInline(const std::string &body, int *httpStatus) {
         *httpStatus = 400;
         return errJson("malformed JSON body");
     }
-    std::string doc = req.str("scenario");
+    // The steps may arrive as a real JSON array or as that array inside a
+    // string. The string form came first; the array is what a client writes
+    // when nobody has told it otherwise, and refusing it only bought a retry
+    // with a layer of backslashes. The step parser works on text either way,
+    // so an array is handed over exactly as it was sent.
+    std::string doc;
+    const JsonValue *sc = req.find("scenario");
+    if (sc && sc->isArray()) {
+        size_t key  = body.find("\"scenario\"");
+        size_t open = (key == std::string::npos) ? key : body.find('[', key);
+        if (open != std::string::npos) doc = body.substr(open);
+    } else if (sc) {
+        doc = sc->asString();
+    }
     if (doc.empty()) {
         *httpStatus = 400;
-        return errJson("missing 'scenario' field (a JSON array as a string)");
+        return errJson("missing 'scenario' field: a JSON array of steps, "
+                       "e.g. {\"scenario\":[{\"at\":0,\"lag\":true,\"lag-time\":100}]}");
     }
     scenarioLoadString(doc.c_str());
     if (!scenarioIsLoaded()) {
         *httpStatus = 400;
         return errJson("no usable steps: every entry needs an 'at' or a 'when' trigger");
     }
-    return okJson("\"steps\":" + numToStr(scenarioStepCount()));
+    return okJson("\"steps\":" + numToStr(scenarioStepCount()) + scenarioWarningsField());
 }
 
 std::string apiReplayStart(const std::string &body, int *httpStatus) {
@@ -642,16 +901,23 @@ std::string controlDispatchJson(const std::string &request) {
         std::string modName = req.str("module");
         if (modName.empty()) return errJson("missing module field");
         Module *mod = findModule(modName);
-        if (!mod) return errJson("unknown module: " + modName);
+        if (!mod) return errJson("unknown module: " + modName + " (modules: " + moduleNameList() + ")");
 
-        if (const JsonValue *en = req.find("enabled")) {
-            InterlockedExchange16(mod->enabledFlag, (short)(en->asBool() ? 1 : 0));
+        std::string unknown;
+        std::vector<std::string> warnings;
+        if (applyEnabledField(req, mod, &warnings)) {
             LOG("pipe: %s enabled=%d", modName.c_str(), (int)*mod->enabledFlag);
         }
-        applyModuleObject(req, mod, nullptr);
+        applyModuleObject(req, mod, &unknown, &warnings);
         // Response shape kept byte-compatible with the pre-Phase-2 pipe API so
-        // existing automation scripts keep working (Phase 2.9).
-        return "{\"status\":\"ok\",\"module\":" + quoted(modName) + "}";
+        // existing automation scripts keep working (Phase 2.9): a request with
+        // nothing wrong in it gets exactly the old reply. The extra members
+        // only appear when a key or a value was not taken, which used to be
+        // reported as plain success.
+        std::string out = "{\"status\":\"ok\",\"module\":" + quoted(modName);
+        if (!unknown.empty()) out += ",\"unknownKeys\":" + quoted(unknown);
+        out += warningsField(warnings) + "}";
+        return out;
     }
 
     if (cmd == "get_stats") {
@@ -688,7 +954,7 @@ std::string controlDispatchJson(const std::string &request) {
         if (filter.empty()) return errJson("missing filter field");
         if (appIsCapturing()) appStopCapture();
         if (!appStartCapture(filter.c_str(), process.c_str(), err, sizeof(err))) {
-            return errJson(err[0] ? err : "failed to start capture");
+            return errJson(noteCaptureFailure(err));
         }
         return okJson("\"filter\":" + quoted(filter));
     }

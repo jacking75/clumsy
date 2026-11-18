@@ -1043,7 +1043,14 @@ function loadInlineScenario() {
     body: JSON.stringify({ scenario: doc })
   }).then(d => {
     $("scenarioEditInfo").textContent = d.steps + " steps loaded";
-    setStatus("Scenario loaded: " + d.steps + " steps.");
+    // The server lints the steps on load; a mistyped key would otherwise only
+    // show up on the console when its step fires.
+    if (d.warnings && d.warnings.length) {
+      setStatus("Scenario loaded with " + d.warnings.length + " warning(s): " +
+                d.warnings.join("; "), true);
+    } else {
+      setStatus("Scenario loaded: " + d.steps + " steps.");
+    }
     return d;
   });
 }

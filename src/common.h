@@ -250,6 +250,32 @@ extern volatile short pipeStopRequested; // set by "stop" command; checked in ma
 // Applies one key=value pair to the matching module (enable/disable or setParam).
 int applyModuleKV(const char *key, const char *value);
 
+// Checked variants  (utils.cpp)
+//
+// setParam clamps and coerces silently, so values that come from outside - the
+// command line, a REST or pipe body, a scenario file - are compared against the
+// ParamSpec first. The verdict says whether the caller got what it asked for.
+#define PARAM_UNKNOWN  0   // no module owns this key; nothing changed
+#define PARAM_OK       1   // applied as given
+#define PARAM_ADJUSTED 2   // applied, but clamped or truncated; msg says how
+#define PARAM_INVALID  3   // not a usable value; nothing changed, msg says why
+// One plain sentence on what a module does to traffic; "" when unlisted.
+const char* moduleDescription(const char *shortName);
+// Spec of `key` inside one module, or across all of them. NULL when unpublished.
+const ParamSpec* moduleParamSpec(const Module *m, const char *key);
+const ParamSpec* paramSpecFind(const char *key, Module **ownerOut);
+// Judges a value without applying it. Returns PARAM_OK / _ADJUSTED / _INVALID
+// and writes a one-line ASCII explanation into msg for the last two.
+int  paramCheckValue(const ParamSpec *spec, const char *value, char *msg, int msgSize);
+// Check, then apply. applyModuleKVChecked also takes a module shortName as the
+// key (enable/disable), the same shape profiles and scenario steps use.
+int  applyModuleParamChecked(Module *m, const char *key, const char *value,
+                             char *msg, int msgSize);
+int  applyModuleKVChecked(const char *key, const char *value, char *msg, int msgSize);
+// Copies the value the module is actually running with. Returns 0 for keys
+// getParams does not report (actions).
+int  moduleParamCurrent(const Module *m, const char *key, char *buf, int bufSize);
+
 // Scenario scripting  (scenario.cpp)
 void scenarioLoad(const char *path);
 // Same parser fed from memory instead of a file, so the dashboard can push a
@@ -259,6 +285,12 @@ void scenarioStart(void);
 void scenarioStop(void);
 void scenarioTick(void);
 int  scenarioIsLoaded(void);
+// Describes what will go wrong when the loaded steps fire - keys no module
+// owns, values setParam would refuse, metrics that do not exist, steps dropped
+// for having no trigger - one problem per '\n'-separated line. Returns how many.
+// Without this a mistyped key only surfaces on the console, minutes later, when
+// its step fires; the client that loaded the scenario never hears about it.
+int  scenarioLint(char *buf, int bufSize);
 int  scenarioStepCount(void);
 int  scenarioIsActive(void);
 
@@ -414,6 +446,9 @@ UINT packetMinTcpSize(void);
 // shared setParam helpers so every module handles "<name>-inbound"/"-outbound"
 // the same way  (utils.cpp)
 int  parseBoolValue(const char *value);
+// 1 when value is one of the words parseBoolValue understands, on or off side.
+// parseBoolValue alone cannot tell "off" from a typo.
+int  isBoolWord(const char *value);
 // Clamp helpers used by setParam implementations.
 short clampShort(int v, int lo, int hi);
 LONG  clampLong(LONG v, LONG lo, LONG hi);
@@ -437,7 +472,11 @@ BOOL tryElevate(BOOL silent);
 void        argSet(const char *key, const char *value);
 const char* argGet(const char *key);                 // NULL when not given
 int         argGetInt(const char *key, int defVal);
-BOOL        parseArgs(int argc, char* argv[]);
+// Walks what parseArgs stored, so main.cpp can reject options nothing reads.
+int         argStoredCount(void);
+const char* argStoredKey(int ix);
+// FALSE when the arguments are not "--key value" pairs; errBuf names the token.
+BOOL        parseArgs(int argc, char* argv[], char *errBuf, int errSize);
 extern BOOL parameterized; // true when any --key value pair was given
 
 // ---------------------------------------------------------------------------

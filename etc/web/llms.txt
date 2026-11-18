@@ -1,0 +1,328 @@
+# clumsy
+
+> clumsy degrades live network traffic on purpose - latency, jitter, packet
+> loss, outages, reordering, corruption, bandwidth caps - so you can watch how
+> an application behaves on a bad connection. It intercepts real packets
+> system-wide (WinDivert on Windows, NFQUEUE on Linux): no proxy, and no change
+> to the application under test. It is driven by command line options and a
+> local REST API. This file is the usage guide for AI agents and scripts.
+
+A Korean edition with the same content is served at `/llms_kr.txt`.
+
+Three references are generated from the running code and are always current.
+Prefer them over anything you remember about clumsy or about similar tools
+(tc/netem, Network Link Conditioner, toxiproxy): the option names differ.
+
+- `clumsy --help`      every option, every module parameter with its range
+                       and default, and the exit codes. Needs no privileges.
+- `GET /api/docs`      every REST endpoint with an example body.
+- `GET /api/modules`   every module with a description, its parameters
+                       (key, type, min, max, options) and their current values.
+
+
+## Rules that prevent the usual mistakes
+
+1. Nothing is shaped until a capture is running. A capture starts with
+   `--filter` on the command line or `POST /api/filter`. Enabling modules
+   without a filter does nothing, and reports no error.
+2. Every option is a `--key value` pair. Switches are spelled out:
+   `--lag on`, never a bare `--lag`.
+3. A module has to be switched on AND configured: `--lag on --lag-time 100`.
+   `--lag-time 100` alone sets a value on a module that stays off.
+4. Chances are percentages from 0 to 100. `--drop-chance 5` is 5%.
+   Times are milliseconds. Bandwidth is kilobytes per second.
+5. Capturing needs privileges: an Administrator console on Windows,
+   CAP_NET_ADMIN (or sudo) on Linux. Check `"admin"` in `GET /api/status`.
+   If it is false, tell the user to start the terminal elevated; you cannot
+   fix this from an unprivileged shell.
+6. Always pass `--timeout <seconds>` when you launch clumsy. It is the safety
+   net: a clumsy you forget to stop keeps degrading the user's network.
+7. Keep the filter narrow - the port or address of the application under
+   test. A broad filter (`true`, `tcp`, `outbound`) also shapes the user's
+   browser, your own API connection, and clumsy's own control port.
+8. clumsy runs until it is told to stop. Launch it in the background, then
+   poll `GET /api/health` until it answers.
+9. Only one clumsy can run at a time (exit code 4 otherwise). If one is
+   already running, drive that one over REST or stop it with `POST /api/quit`.
+10. Read the whole reply. A REST reply can be `"status":"ok"` and still carry
+    `"unknownKeys"` (a key no module has) or `"warnings"` (a value that was
+    clamped or not applied). `"params"` shows what is actually in effect, and
+    `"capturing": false` means the setting is stored but nothing is being
+    shaped yet. A request in which no key at all was usable is an error (400).
+11. When you are done, stop it: `POST /api/quit`. Then tell the user the
+    network is back to normal.
+
+
+## Picking a module
+
+Modules run in this order on every captured packet. All start switched off.
+Every module also takes `<module>-inbound` and `<module>-outbound` (on|off,
+both default on) to limit it to one direction.
+
+| To reproduce                         | Module    | Parameters (range, default)                                   |
+|--------------------------------------|-----------|---------------------------------------------------------------|
+| constant extra latency               | lag       | lag-time 0..15000 ms (50)                                     |
+| unstable latency                     | jitter    | jitter-min, jitter-max 0..5000 ms (20, 100); jitter-dist uniform/normal/pareto (uniform) |
+| evenly spread packet loss            | drop      | drop-chance 0..100 % (10)                                     |
+| loss that comes in bursts            | burstloss | burstloss-good, burstloss-bad: drop % in the good/bad state (2, 80); burstloss-gb, burstloss-bg: % chance per packet to switch good->bad, bad->good (5, 20) |
+| total outage, repeating              | blackout  | blackout-duration 100..60000 ms (3000); blackout-gap 1000..300000 ms of normal traffic between outages (15000); blackout-trigger: action, start/stop an outage now |
+| stutter: hold, then release at once  | throttle  | throttle-frame 0..1000 ms (30); throttle-chance 0..100 % (10); throttle-drop on/off: drop instead of release (off) |
+| duplicated packets                   | duplicate | duplicate-count 2..50 copies (2); duplicate-chance 0..100 % (10) |
+| packets arriving out of order        | ood       | ood-chance 0..100 % (10); ood-buffer 2..50 packets (5); ood-delay 10..2000 ms (200) |
+| corrupted application data           | tamper    | tamper-chance 0..100 % (10); tamper-position 0=front 1=center 2=back 3=random (1); tamper-checksum on/off: fix checksums so the damage reaches the app (on) |
+| bit errors (noisy wireless link)     | corrupt   | corrupt-chance 0..100 % of packets (10); corrupt-ber 0..1000000 flipped bits per million (100); corrupt-checksum on/off (on) |
+| TCP connections torn down            | reset     | reset-chance 0..100 % (0); reset-next: action, reset the next packet |
+| slow link                            | bandwidth | bandwidth-bandwidth 0..99999 KB/s (10)                        |
+
+On the command line each key is prefixed with `--`. In REST bodies and
+scenario files the same keys are used without the dashes.
+
+Typical mixes:
+
+| Condition        | Settings                                                          |
+|------------------|-------------------------------------------------------------------|
+| Mobile 4G        | lag 80 ms, drop 2 %, throttle 10 %                                |
+| Mobile 3G        | lag 150 ms, drop 5 %, bandwidth 500 KB/s                          |
+| Satellite        | lag 500 ms, drop 1 %                                              |
+| Unstable Wi-Fi   | jitter 20..200 ms, burstloss good 2 / bad 80                      |
+| Tunnel / lift    | blackout: a 3000 ms outage after every 30000 ms of traffic        |
+
+Notes on values:
+
+- Modules stack. Each enabled module acts on what the previous ones let
+  through, so `drop` 5 % plus `burstloss` loses more than either alone.
+- blackout alternates `blackout-gap` ms of normal traffic with
+  `blackout-duration` ms of outage. "2 s down every 20 s" is duration 2000,
+  gap 18000.
+- burstloss defaults spend about 20 % of the time in the bad state, which
+  averages near 18 % loss. For milder bursts lower `burstloss-gb` (how often a
+  burst starts) or `burstloss-bad` (how lossy a burst is).
+- bandwidth is in kilobytes per second (1 KB = 1024 bytes), not kilobits.
+  A limit of 0 blocks everything: nothing is released from the queue.
+- The actions `blackout-trigger` and `reset-next` are ignored unless their
+  module is already on and a capture is running. Switch the module on and
+  start the capture first, then send the action in a separate request.
+
+
+## Writing a filter
+
+The filter decides which packets clumsy touches; everything else passes
+untouched. The syntax is the WinDivert filter language.
+
+    udp and udp.DstPort == 7777                          one UDP port, outbound to it
+    udp and (udp.DstPort == 7777 or udp.SrcPort == 7777) both directions of that port
+    tcp and (tcp.DstPort == 443 or tcp.SrcPort == 443)   all HTTPS
+    ip.DstAddr == 10.0.0.5 or ip.SrcAddr == 10.0.0.5     one remote host
+    outbound and udp                                     everything UDP leaving this machine
+    outbound and loopback                                localhost-to-localhost traffic
+
+- Building blocks: `and` `or` `not` and parentheses; `inbound` `outbound`
+  `loopback`; `tcp` `udp` `icmp` `ip` `ipv6`; `ip.SrcAddr` `ip.DstAddr`
+  `tcp.SrcPort` `tcp.DstPort` `udp.SrcPort` `udp.DstPort`; `==` `!=` `<` `>`
+  `<=` `>=`.
+- Loopback traffic only ever matches as `outbound`; write
+  `outbound and loopback`, never `inbound and loopback`.
+- To exclude something, wrap a positive test in `not ( ... )`. A bare
+  `tcp.DstPort != 8080` is false for every non-TCP packet, so it silently
+  removes all UDP from the match.
+- clumsy's own REST API is TCP on 127.0.0.1, port 8080 unless `--web-port`
+  changed it. If the filter matches loopback TCP, exclude that port or heavy
+  loss will lock you out of the API (put your own port in place of 8080):
+  `outbound and loopback and not (tcp.DstPort == 8080 or tcp.SrcPort == 8080)`
+- A test on one port (`udp.DstPort == 7777`) only matches packets going TO
+  that port. To shape the replies as well, test both `DstPort` and `SrcPort`
+  as in the second example above.
+- `--process game.exe` (or `"process"` in `POST /api/filter`) additionally
+  limits the capture to the ports that process has open right now.
+- `GET /api/presets` returns ready-made named filters (game engines, etc.).
+- A filter that does not parse fails the start with a message; fix it and
+  try again.
+
+
+## Recipe A: one timed run, command line only
+
+Use this when the conditions stay the same for the whole test.
+
+    clumsy --filter "udp and udp.DstPort == 7777" --lag on --lag-time 150 --drop on --drop-chance 5 --timeout 60 --stats-log stats.csv --report-out report.html
+
+It exits by itself after 60 seconds with code 0, leaving `stats.csv` (one
+row per second) and `report.html`. Run it in the background while you drive
+the application under test, or in the foreground if the test runs elsewhere.
+The output files are only written while a capture is running: after an exit
+code of 3 there is no file, and that is not a separate problem.
+
+This example shapes packets going to port 7777 only. Use the two-sided
+filter from the section above to shape the replies too.
+
+Exit codes:
+
+    0  clean exit (--timeout reached, Ctrl+C, POST /api/quit)
+    2  bad command line: unknown option, unusable value, or a --profile /
+       --scenario that could not be loaded. Nothing was started. The message
+       on stderr names the option and suggests the right spelling.
+    3  the capture (--filter) or replay (--replay-in) could not start: not
+       elevated, or the filter did not parse. Nothing is being shaped.
+    4  another clumsy is already running.
+
+
+## Recipe B: start once, change conditions over REST
+
+Use this when conditions change during the test, or you need to read
+statistics while it runs. The base URL is `http://127.0.0.1:8080` unless
+`--web-port` says otherwise.
+
+1. Launch in the background, with no filter yet and a generous timeout:
+
+       clumsy --timeout 600 --stats-console 0
+
+2. Wait until `GET /api/health` returns `{"status":"ok",...}`.
+3. `GET /api/status` - stop here and report to the user if `"admin"` is false.
+4. Configure the modules in one request:
+
+       POST /api/apply
+       {"lag":true,"lag-time":150,"drop":true,"drop-chance":5}
+
+   The reply echoes what is now in effect:
+   `{"status":"ok","applied":4,"capturing":false,"params":{"lag":"true","lag-time":"150","drop":"true","drop-chance":"5.0"}}`
+
+5. Start capturing:
+
+       POST /api/filter
+       {"filter":"udp and udp.DstPort == 7777"}
+
+6. Run the test. Change conditions at any time with `POST /api/apply` or
+   `POST /api/modules/{name}`; changes take effect immediately.
+7. Verify (next section), collect `GET /api/report` if a report is wanted.
+8. `POST /api/stop` returns the network to normal and keeps clumsy alive for
+   another round; `POST /api/quit` shuts it down.
+
+curl (bash):
+
+    curl -s http://127.0.0.1:8080/api/status
+    curl -s -X POST http://127.0.0.1:8080/api/apply -H "Content-Type: application/json" -d '{"lag":true,"lag-time":150}'
+    curl -s -X POST http://127.0.0.1:8080/api/filter -H "Content-Type: application/json" -d '{"filter":"udp and udp.DstPort == 7777"}'
+    curl -s -X POST http://127.0.0.1:8080/api/quit
+
+PowerShell (in Windows PowerShell 5.1 `curl` is an alias for
+Invoke-WebRequest and takes different arguments; use these instead):
+
+    Invoke-RestMethod http://127.0.0.1:8080/api/status
+    Invoke-RestMethod -Method Post http://127.0.0.1:8080/api/apply -ContentType application/json -Body '{"lag":true,"lag-time":150}'
+    Invoke-RestMethod -Method Post http://127.0.0.1:8080/api/filter -ContentType application/json -Body '{"filter":"udp and udp.DstPort == 7777"}'
+    Invoke-RestMethod -Method Post http://127.0.0.1:8080/api/quit
+
+Starting it in the background from PowerShell:
+
+    Start-Process clumsy.exe -ArgumentList '--timeout','600','--stats-console','0' -WindowStyle Hidden
+
+REST conventions:
+
+- Only GET and POST exist. POST bodies are JSON objects. Reads are GET,
+  actions are POST; a wrong method or path returns a JSON error that says so.
+- Every JSON reply has `"status"`: `"ok"` or `"error"` (with `"message"`).
+- Booleans may be `true`/`false`, `"on"`/`"off"` or `1`/`0`.
+- A token is only needed when clumsy was started with `--web-token` or a
+  non-loopback `--web-bind`: send it as the `X-Clumsy-Token` header.
+- `GET /api/stream` is a Server-Sent Events stream that never ends. From a
+  script, poll `GET /api/stats` instead.
+
+
+## Verifying that it is working
+
+`GET /api/stats` while capturing:
+
+    {"status":"ok","capturing":true,"elapsedMs":12040,"captured":5321,"sent":5108,
+     "modules":{"lag":{"enabled":true,"affected":5321},"drop":{"enabled":true,"affected":213}, ...},
+     "latency":{"count":5108,"p50":150,"p95":151,"p99":152, ...}, ...}
+
+- `capturing` false: no capture is running. Start one with a filter.
+- `captured` stays 0: the filter matches no traffic. Check the port, the
+  protocol and the direction, and that the application is actually sending.
+- `captured` grows but a module's `affected` stays 0: that module is off, its
+  chance is 0, or its direction switches exclude the traffic.
+- `latency` reports the delay lag and jitter really added.
+
+The user-visible result (the application lagging, retrying, disconnecting)
+is the real check; the counters only prove packets were touched.
+
+
+## Scenarios: conditions that change over time
+
+A scenario is a JSON array of steps. Each step has one trigger and any of the
+keys `POST /api/apply` takes. It starts playing when the capture starts.
+
+    [
+      {"at": 0,  "lag": true, "lag-time": 80},
+      {"at": 20, "drop": true, "drop-chance": 5},
+      {"at": 40, "blackout": true, "blackout-duration": 3000, "blackout-gap": 20000},
+      {"at": 70, "lag": false, "drop": false, "blackout": false},
+      {"when": "captured_count", "op": ">=", "value": 20000, "bandwidth": true, "bandwidth-bandwidth": 200},
+      {"at": 90, "repeat": 30, "times": 5, "drop-chance": 10}
+    ]
+
+- `at`: seconds since the capture started.
+- `when` + `op` (`>=` `>` `<=` `<` `==`) + `value`: fire when a metric crosses a
+  value. Metrics: `captured_count`, `sent_count`, `pps`, `elapsed_sec`,
+  `lag_buf`, `jitter_buf`, `bandwidth_buf`, `affected:<module>`.
+- `repeat`: fire again every N seconds; `times`: how many times (absent = forever).
+- Keys starting with `_` are ignored, so `"_comment": "..."` is safe.
+- Load it with `--scenario file.json`, or without a file:
+
+      POST /api/scenario/loadinline
+      {"scenario": [{"at":0,"lag":true,"lag-time":80},{"at":30,"lag":false}]}
+
+  The reply lists `"warnings"` for unknown keys, bad values and unknown
+  metrics - fix them before starting the capture.
+- Steps are timed from the capture start and only run while capturing. Load
+  the scenario first, then `POST /api/filter`; the scenario starts with it.
+
+
+## Other outputs
+
+- `--stats-log file.csv|file.json` with `--stats-interval <sec>`: time series.
+- `--report-out report.html` (or `GET /api/report`): HTML session report.
+- `--pcap-out file.pcap` (or `POST /api/pcap/start`): Wireshark-readable dump;
+  `--pcap-stage pre|post|both` picks before or after the modules ran.
+- `GET /metrics`: Prometheus text format.
+- Profiles save a module setup under a name: `POST /api/profiles {"name":"x"}`,
+  then `--profile x` or `POST /api/profiles/x/apply`. None ship by default.
+
+
+## Platform notes
+
+Windows
+- Needs an Administrator console. `--elevate on` asks through a UAC prompt
+  that a person has to accept; the elevated clumsy then opens in a new
+  console window and the original process exits with 0, so its output is
+  gone - follow it over REST.
+- A second control channel exists on the named pipe `\\.\pipe\clumsy` (one
+  JSON request, one JSON reply, e.g. `{"cmd":"get_status"}`, `{"cmd":"quit"}`).
+  It does not use the network, so it still answers when a filter has cut
+  off the REST port.
+
+Linux
+- Needs CAP_NET_ADMIN (run with sudo, or install the .deb which grants it).
+- Add `--auto-iptables on`. Without it clumsy only sees traffic that an
+  iptables NFQUEUE rule sends to it, and you would have to manage those
+  rules yourself.
+- The filter language is a subset: the keywords listed above, IPv4
+  addresses only. Anything unsupported is rejected at start.
+- The control channel is a Unix socket instead of a named pipe; its path is
+  printed in the startup banner.
+- Under WSL2 clumsy only sees traffic inside the WSL2 network namespace, not
+  the Windows host's applications.
+
+
+## If something goes wrong
+
+| Symptom                                           | Cause and fix                                              |
+|---------------------------------------------------|------------------------------------------------------------|
+| exit 2 immediately                                | Read stderr: it names the option. Check `clumsy --help`.    |
+| exit 3, "needs Administrator rights"              | Not elevated. Ask the user to run the terminal as Administrator. |
+| exit 3, filter error                              | The filter did not parse. Simplify it and retry.           |
+| exit 4, "already an instance"                     | Use the running one (`GET /api/status`) or `POST /api/quit` it. |
+| REST connection refused                           | Not started yet (poll /api/health), a different `--web-port`, or `--web off`. |
+| REST was working, now times out                   | Your filter is shaping the control port. Wait for `--timeout`, or send `{"cmd":"quit"}` to the named pipe. Exclude the port next time. |
+| 401 from every endpoint                           | A token is set. Send the `X-Clumsy-Token` header.          |
+| "status":"ok" but nothing changes                 | No capture is running, or check `unknownKeys` / `warnings` in the reply. |
+| The whole machine has no network                  | Filter too broad with heavy loss or blackout. `POST /api/quit`, or wait for `--timeout`. |

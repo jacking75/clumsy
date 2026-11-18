@@ -51,6 +51,8 @@ install -D -m 0755 bin/linux/clumsy        %{buildroot}%{_bindir}/clumsy
 install -D -m 0644 etc/config.json         %{buildroot}%{_datadir}/clumsy/config.json
 install -D -m 0644 etc/config.txt          %{buildroot}%{_datadir}/clumsy/config.txt
 install -D -m 0644 etc/web/index.html      %{buildroot}%{_datadir}/clumsy/web/index.html
+install -D -m 0644 etc/web/llms.txt        %{buildroot}%{_datadir}/clumsy/web/llms.txt
+install -D -m 0644 etc/web/llms_kr.txt     %{buildroot}%{_datadir}/clumsy/web/llms_kr.txt
 install -D -m 0644 etc/scenario-example.json %{buildroot}%{_datadir}/clumsy/scenario-example.json
 install -D -m 0644 docs/LINUX.md           %{buildroot}%{_docdir}/clumsy/LINUX.md
 install -D -m 0644 README.md               %{buildroot}%{_docdir}/clumsy/README.md
@@ -62,6 +64,8 @@ install -D -m 0644 README.md               %{buildroot}%{_docdir}/clumsy/README.
 mkdir -p %{buildroot}%{_bindir}/web
 ln -sf ../share/clumsy/config.json      %{buildroot}%{_bindir}/config.json
 ln -sf ../../share/clumsy/web/index.html %{buildroot}%{_bindir}/web/index.html
+ln -sf ../../share/clumsy/web/llms.txt   %{buildroot}%{_bindir}/web/llms.txt
+ln -sf ../../share/clumsy/web/llms_kr.txt %{buildroot}%{_bindir}/web/llms_kr.txt
 
 %post
 # Same rationale as the deb postinst: file capabilities rather than setuid root.
@@ -73,6 +77,8 @@ fi
 %files
 %{_bindir}/clumsy
 %{_bindir}/web/index.html
+%{_bindir}/web/llms.txt
+%{_bindir}/web/llms_kr.txt
 %{_bindir}/config.json
 %{_datadir}/clumsy/
 %doc %{_docdir}/clumsy/

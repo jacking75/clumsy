@@ -555,13 +555,191 @@ static void applyCliModuleParams(void) {
         }
         if (!m->setParam) continue;
         for (p = 0; p < m->paramSpecCount; ++p) {
-            const char *pv = argGet(m->paramSpecs[p].key);
+            const char *key = m->paramSpecs[p].key;
+            const char *pv = argGet(key);
             if (pv) {
-                m->setParam(m->paramSpecs[p].key, pv);
-                INFO("param  %s = %s", m->paramSpecs[p].key, pv);
+                char now[PARAM_VAL_SIZE];
+                m->setParam(key, pv);
+                // What the module is running with, not what was typed: the two
+                // differ whenever setParam clamped, and echoing the request
+                // back would report a value that is not in effect.
+                INFO("param  %s = %s", key,
+                     moduleParamCurrent(m, key, now, sizeof(now)) ? now : pv);
             }
         }
     }
+}
+
+// ---------------------------------------------------------------------------
+// Command line validation
+//
+// parseArgs() accepts any "--key value" pair, and every reader of the argument
+// store asks for the keys it knows, so a misspelt option used to be dropped
+// without a word: "--lag-ms 100" started clumsy with lag at its default and an
+// exit code of 0. That is survivable for someone watching the console and
+// fatal for a script or a language model, which can only judge by the result.
+// So the command line is checked as a whole before anything starts.
+// ---------------------------------------------------------------------------
+
+// Longest key the argument store keeps (ARG_KEY_SIZE in utils.cpp).
+#define ARG_KEY_MAX 48
+
+// Process exit codes. Documented in --help, README and etc/web/llms.txt.
+#define EXIT_BAD_USAGE       2   // unknown option, unusable value, missing input file
+#define EXIT_START_FAILED    3   // --filter / --replay-in could not start
+#define EXIT_ALREADY_RUNNING 4   // another clumsy holds the single-instance claim
+
+// Every non-module option some argGet() call reads. Add new options here as
+// well as in printUsage(), or validateCliArgs() will reject them.
+static const char *const globalArgs[] = {
+    "filter", "process", "timeout", "elevate",
+    "queue-num", "inject-mark", "auto-iptables",
+    "web", "web-port", "web-bind", "web-token",
+    "profile", "scenario",
+    "stats-log", "stats-interval", "stats-console",
+    "pcap-out", "pcap-stage", "pcap-max-packets", "pcap-max-bytes",
+    "replay-in", "replay-speed", "replay-loop",
+    "report-out", "enable-plugins", "verbose",
+};
+#define GLOBAL_ARG_CNT ((int)(sizeof(globalArgs) / sizeof(globalArgs[0])))
+
+// Names other tools use for the same thing. A model that has never seen clumsy
+// reaches for these first, and "unknown option" alone does not get it from
+// "--delay" to a module that has to be switched on separately.
+static const struct { const char *wrong; const char *hint; } argSynonyms[] = {
+    { "delay",       "--lag on --lag-time <ms>" },
+    { "latency",     "--lag on --lag-time <ms>" },
+    { "ping",        "--lag on --lag-time <ms>" },
+    { "loss",        "--drop on --drop-chance <percent>" },
+    { "packet-loss", "--drop on --drop-chance <percent>" },
+    { "rate",        "--bandwidth on --bandwidth-bandwidth <KB/s>" },
+    { "limit",       "--bandwidth on --bandwidth-bandwidth <KB/s>" },
+    { "reorder",     "--ood on --ood-chance <percent>" },
+    { "duration",    "--timeout <sec>" },
+    { "time",        "--timeout <sec>" },
+    { "port",        "a port test inside --filter, e.g. \"udp.DstPort == 7777\" "
+                     "(--web-port only moves the control API)" },
+    { "pid",         "--process <name.exe>" },
+    { "output",      "--stats-log, --pcap-out or --report-out" },
+    { "config",      "--profile <name> or --scenario <path>" },
+};
+
+static int editDistance(const char *a, const char *b) {
+    int row[ARG_KEY_MAX + 1];
+    int la = (int)strlen(a), lb = (int)strlen(b), i, j;
+
+    if (la > ARG_KEY_MAX || lb > ARG_KEY_MAX) return ARG_KEY_MAX;
+    for (j = 0; j <= lb; ++j) row[j] = j;
+    for (i = 1; i <= la; ++i) {
+        int diag = row[0];
+        row[0] = i;
+        for (j = 1; j <= lb; ++j) {
+            int above = row[j];
+            int cost = diag + (a[i - 1] == b[j - 1] ? 0 : 1);
+            if (row[j - 1] + 1 < cost) cost = row[j - 1] + 1;
+            if (above + 1 < cost)      cost = above + 1;
+            row[j] = cost;
+            diag = above;
+        }
+    }
+    return row[lb];
+}
+
+// Writes the most useful thing to say about an option nothing recognises.
+static void suggestForUnknownArg(const char *key, char *buf, int size) {
+    const char *best = NULL;
+    int bestDist = ARG_KEY_MAX, ix, p, pos = 0, limit;
+    size_t i;
+
+    buf[0] = '\0';
+
+    for (i = 0; i < sizeof(argSynonyms) / sizeof(argSynonyms[0]); ++i) {
+        if (_stricmp(key, argSynonyms[i].wrong) == 0) {
+            snprintf(buf, (size_t)size, "clumsy spells that %s", argSynonyms[i].hint);
+            return;
+        }
+    }
+
+    // "--lag-ms": right module, wrong parameter. List what that module takes.
+    for (ix = 0; ix < MODULE_CNT; ++ix) {
+        const Module *m = modules[ix];
+        size_t nameLen = strlen(m->shortName);
+        if (strncmp(key, m->shortName, nameLen) == 0 && key[nameLen] == '-') {
+            pos = appendf(buf, size, pos, "%s takes: --%s on|off", m->shortName, m->shortName);
+            for (p = 0; p < m->paramSpecCount; ++p) {
+                pos = appendf(buf, size, pos, ", --%s", m->paramSpecs[p].key);
+            }
+            return;
+        }
+    }
+
+    // Otherwise the nearest spelling, if one is near enough to be a typo.
+    for (ix = 0; ix < GLOBAL_ARG_CNT; ++ix) {
+        int d = editDistance(key, globalArgs[ix]);
+        if (d < bestDist) { bestDist = d; best = globalArgs[ix]; }
+    }
+    for (ix = 0; ix < MODULE_CNT; ++ix) {
+        int d = editDistance(key, modules[ix]->shortName);
+        if (d < bestDist) { bestDist = d; best = modules[ix]->shortName; }
+        for (p = 0; p < modules[ix]->paramSpecCount; ++p) {
+            d = editDistance(key, modules[ix]->paramSpecs[p].key);
+            if (d < bestDist) { bestDist = d; best = modules[ix]->paramSpecs[p].key; }
+        }
+    }
+    limit = (int)strlen(key) / 3;
+    if (limit < 2) limit = 2;
+    if (best && bestDist <= limit) {
+        snprintf(buf, (size_t)size, "did you mean --%s?", best);
+    }
+}
+
+// Checks every stored argument. Prints one line per problem to stderr and
+// returns how many make the command line unusable. Out-of-range numbers are
+// not among them: they are clamped as they always were, with a warning, so
+// existing scripts keep running.
+static int validateCliArgs(void) {
+    int errors = 0, i, ix;
+
+    for (i = 0; i < argStoredCount(); ++i) {
+        const char *key = argStoredKey(i);
+        const char *value = argGet(key);
+        const ParamSpec *spec;
+        char msg[MSG_BUFSIZE];
+        int known = 0;
+
+        for (ix = 0; ix < GLOBAL_ARG_CNT && !known; ++ix) {
+            if (strcmp(key, globalArgs[ix]) == 0) known = 1;
+        }
+        if (known) continue;
+
+        for (ix = 0; ix < MODULE_CNT && !known; ++ix) {
+            if (strcmp(key, modules[ix]->shortName) == 0) known = 1;
+        }
+        if (known) {
+            if (!isBoolWord(value)) {
+                fprintf(stderr, "clumsy: --%s %s: use on or off\n", key, value);
+                errors++;
+            }
+            continue;
+        }
+
+        spec = paramSpecFind(key, NULL);
+        if (spec) {
+            int verdict = paramCheckValue(spec, value, msg, sizeof(msg));
+            if (verdict == PARAM_INVALID) {
+                fprintf(stderr, "clumsy: --%s\n", msg);
+                errors++;
+            } else if (verdict == PARAM_ADJUSTED) {
+                fprintf(stderr, "clumsy: warning: --%s\n", msg);
+            }
+            continue;
+        }
+
+        suggestForUnknownArg(key, msg, sizeof(msg));
+        fprintf(stderr, "clumsy: unknown option --%s%s%s\n", key, msg[0] ? " - " : "", msg);
+        errors++;
+    }
+    return errors;
 }
 
 #if defined(_WIN32)
@@ -598,6 +776,66 @@ static void installShutdownHandler(void) {
 #endif
 }
 
+// The module half of --help, generated from the same ParamSpec tables the web
+// form and the REST API are built from. A hand-written list here went stale
+// the day a module was added, and "--<module>-<param> <v>" on its own leaves
+// the reader to guess that the delay is --lag-time and not --lag-ms.
+static void printModuleUsage(void) {
+    int ix, p;
+
+    printf("Modules (%d), applied to each packet in this order. All start off.\n",
+           MODULE_CNT);
+    for (ix = 0; ix < MODULE_CNT; ++ix) {
+        const Module *m = modules[ix];
+        char line[96];
+
+        snprintf(line, sizeof(line), "--%s on|off", m->shortName);
+        printf("  %-22s %s\n", line, moduleDescription(m->shortName)[0]
+                                     ? moduleDescription(m->shortName) : m->displayName);
+
+        for (p = 0; p < m->paramSpecCount; ++p) {
+            const ParamSpec *s = &m->paramSpecs[p];
+            const char *tail = s->key + strlen(s->key);
+            char now[PARAM_VAL_SIZE] = "";
+            int isBool = strcmp(s->type, "bool") == 0;
+
+            // Direction switches are the same two on every module; they are
+            // described once below rather than 24 times here.
+            if (tail - s->key > 8 && strcmp(tail - 8, "-inbound") == 0)  continue;
+            if (tail - s->key > 9 && strcmp(tail - 9, "-outbound") == 0) continue;
+
+            if (isBool) {
+                snprintf(line, sizeof(line), "--%s on|off", s->key);
+            } else if (strcmp(s->type, "action") == 0) {
+                snprintf(line, sizeof(line), "--%s on", s->key);
+            } else if (strcmp(s->type, "enum") == 0) {
+                snprintf(line, sizeof(line), "--%s <%s>", s->key, s->options ? s->options : "");
+                for (char *c = line; *c; ++c) if (*c == ',') *c = '|';
+            } else if (s->minVal != s->maxVal) {
+                snprintf(line, sizeof(line), "--%s <%.10g..%.10g>", s->key, s->minVal, s->maxVal);
+            } else {
+                snprintf(line, sizeof(line), "--%s <%s>", s->key, s->type);
+            }
+
+            if (strcmp(s->type, "action") == 0) {
+                printf("    %-32s %s (one-shot action)\n", line, s->label);
+            } else if (moduleParamCurrent(m, s->key, now, sizeof(now))) {
+                // --help runs before any argument is applied, so what the
+                // module reports here is its default.
+                const char *shown = now;
+                if (isBool) shown = parseBoolValue(now) ? "on" : "off";
+                printf("    %-32s %s, default %s\n", line, s->label, shown);
+            } else {
+                printf("    %-32s %s\n", line, s->label);
+            }
+        }
+    }
+    printf(
+"  Every module also takes --<module>-inbound on|off and\n"
+"  --<module>-outbound on|off (both default on) to pick a direction.\n"
+"  Chances are percentages, not fractions: --drop-chance 5 means 5%%.\n");
+}
+
 static void printUsage(void) {
     printf(
 "clumsy " CLUMSY_VERSION " - console + web network condition simulator\n"
@@ -606,6 +844,14 @@ static void printUsage(void) {
 "\n"
 "Capture:\n"
 "  --filter \"<expr>\"        WinDivert filter; capture starts immediately\n"
+"                           e.g. both directions of UDP port 7777:\n"
+"                             \"udp and (udp.DstPort == 7777 or udp.SrcPort == 7777)\"\n"
+"                           one remote host:\n"
+"                             \"ip.DstAddr == 10.0.0.5 or ip.SrcAddr == 10.0.0.5\"\n"
+"                           localhost traffic:\n"
+"                             \"outbound and loopback\"\n"
+"                           Without it clumsy idles until a filter arrives\n"
+"                           over the dashboard or POST /api/filter.\n"
 "  --process <name.exe>     restrict capture to one process's local ports\n"
 "  --timeout <sec>          quit automatically after N seconds\n"
 #if defined(_WIN32)
@@ -625,11 +871,11 @@ static void printUsage(void) {
 "  --web-bind <addr>        bind address (default 127.0.0.1; token required\n"
 "                           for anything else)\n"
 "  --web-token <token>      fixed auth token instead of a random one\n"
-"\n"
-"Modules (12):  lag jitter drop burstloss blackout throttle duplicate ood\n"
-"               tamper corrupt reset bandwidth\n"
-"  --<module> on|off        enable a module,   e.g. --drop on\n"
-"  --<module>-<param> <v>   set a parameter,   e.g. --drop-chance 10.0\n"
+"\n");
+
+    printModuleUsage();
+
+    printf(
 "\n"
 "Automation:\n"
 "  --profile <name>         apply a profile from profiles.json\n"
@@ -638,6 +884,8 @@ static void printUsage(void) {
 "  --stats-interval <sec>   stats log interval (default 1)\n"
 "  --stats-console <sec>    console heartbeat interval (default 10, 0=off)\n"
 "  --pcap-out <path>        dump captured packets to a libpcap file\n"
+"  --pcap-stage <s>         pre | post | both: before or after the modules\n"
+"                           ran (default post)\n"
 "  --pcap-max-packets <n>   stop the pcap dump after N packets (0=unlimited)\n"
 "  --pcap-max-bytes <n>     stop the pcap dump after N bytes  (0=unlimited)\n"
 "  --replay-in <path>       replay a libpcap file back onto the wire\n"
@@ -646,7 +894,32 @@ static void printUsage(void) {
 "  --report-out <path>      write an HTML session report on stop\n"
 "  --enable-plugins <dir>   load custom module DLLs from <dir>\n"
 "  --verbose on|off         per-packet trace logging\n"
-"  --help                   show this text\n");
+"  --help                   show this text\n"
+"  --version                print the version\n"
+"\n"
+"Scripts and AI agents:\n"
+"  * Every option is a \"--key value\" pair; switches take on or off.\n"
+"  * An unknown option or an unusable value stops clumsy before it starts\n"
+"    (exit 2). An out-of-range number is clamped and reported.\n"
+"  * clumsy runs until Ctrl+C, --timeout, or POST /api/quit. Start it in the\n"
+"    background, poll GET /api/health, and always pass --timeout as a\n"
+"    safety net so a forgotten instance cannot keep degrading the network.\n"
+"  * While it runs, GET http://127.0.0.1:8080/api/docs lists every REST\n"
+"    endpoint and GET /llms.txt is a plain-text guide written for agents.\n"
+"  * Capture needs "
+#if defined(_WIN32)
+"an Administrator console"
+#else
+"CAP_NET_ADMIN"
+#endif
+"; GET /api/status reports \"admin\".\n"
+"\n"
+"Exit codes:\n"
+"  0  clean exit (Ctrl+C, --timeout, POST /api/quit)\n"
+"  2  bad command line: unknown option, unusable value, or a --profile /\n"
+"     --scenario that could not be loaded\n"
+"  3  the capture (--filter) or replay (--replay-in) could not start\n"
+"  4  another clumsy is already running\n");
 }
 
 int main(int argc, char* argv[]) {
@@ -654,6 +927,7 @@ int main(int argc, char* argv[]) {
     int   timeoutSec, statsConsoleSec;
     DWORD startTick;
     int   webEnabled;
+    int   exitCode = 0;
 
     InitializeCriticalSection(&appLock);
     pcapExportInit();
@@ -664,15 +938,30 @@ int main(int argc, char* argv[]) {
     srand((unsigned int)time(NULL));
 
     if (argc > 1) {
-        if (strcmp(argv[1], "--help") == 0 || strcmp(argv[1], "-h") == 0 ||
-            strcmp(argv[1], "/?") == 0) {
-            printUsage();
-            return 0;
+        char argErr[MSG_BUFSIZE];
+        int i;
+
+        // Anywhere on the line, not only first: "clumsy --filter udp --help"
+        // is someone asking for help, and --help takes no value so parseArgs
+        // would otherwise reject the whole line over it.
+        for (i = 1; i < argc; ++i) {
+            if (strcmp(argv[i], "--help") == 0 || strcmp(argv[i], "-h") == 0 ||
+                strcmp(argv[i], "/?") == 0) {
+                printUsage();
+                return 0;
+            }
+            if (strcmp(argv[i], "--version") == 0) {
+                printf("clumsy " CLUMSY_VERSION "\n");
+                return 0;
+            }
         }
-        if (!parseArgs(argc, argv)) {
-            fprintf(stderr, "Invalid arguments. Options are \"--key value\" pairs, "
-                            "e.g. --drop on. Run with --help for the full list.\n");
-            return -1;
+        if (!parseArgs(argc, argv, argErr, sizeof(argErr))) {
+            fprintf(stderr, "clumsy: %s\nRun clumsy --help for every option.\n", argErr);
+            return EXIT_BAD_USAGE;
+        }
+        if (validateCliArgs() > 0) {
+            fprintf(stderr, "Nothing was started. Run clumsy --help for every option.\n");
+            return EXIT_BAD_USAGE;
         }
         parameterized = TRUE;
     }
@@ -685,8 +974,11 @@ int main(int argc, char* argv[]) {
     installShutdownHandler();
 
     if (checkIsRunning()) {
-        fprintf(stderr, "There's already an instance of clumsy running. Aborting.\n");
-        return -1;
+        fprintf(stderr,
+                "There's already an instance of clumsy running. Aborting.\n"
+                "Drive the running one over its REST API instead (GET /api/docs on its\n"
+                "web port, 8080 by default), or stop it first with POST /api/quit.\n");
+        return EXIT_ALREADY_RUNNING;
     }
 
     // Elevation is opt-in now: a console app that silently relaunches itself in
@@ -719,17 +1011,53 @@ int main(int argc, char* argv[]) {
     {
         const char *scenarioPath = argGet("scenario");
         if (scenarioPath) {
+            char lint[2048];
+
             scenarioLoad(scenarioPath);
             INFO("scenario: %s (%s, %d steps)", scenarioPath,
                  scenarioIsLoaded() ? "loaded" : "failed to load", scenarioStepCount());
+            // A run that was asked to play a scenario and has none is not the
+            // run that was asked for; carrying on would report success for a
+            // test that never applied a single condition.
+            if (!scenarioIsLoaded()) {
+                fprintf(stderr, "clumsy: --scenario %s has no usable steps. It must be a JSON "
+                                "array of objects, each with an \"at\" or a \"when\" trigger.\n",
+                        scenarioPath);
+                return EXIT_BAD_USAGE;
+            }
+            if (scenarioLint(lint, sizeof(lint)) > 0) {
+                char *line = lint;
+                while (line && *line) {
+                    char *nl = strchr(line, '\n');
+                    if (nl) *nl = '\0';
+                    INFO("scenario: WARNING %s", line);
+                    line = nl ? nl + 1 : NULL;
+                }
+            }
         }
     }
 
     {
         const char *profileName = argGet("profile");
         if (profileName) {
-            INFO("profile '%s': %s", profileName,
-                 profileApply(profileName) ? "applied" : "not found");
+            int applied = profileApply(profileName);
+            INFO("profile '%s': %s", profileName, applied ? "applied" : "not found");
+            if (!applied) {
+                char names[MAX_PROFILES][PROFILE_NAME_SIZE];
+                int cnt = profileNamesSnapshot(names, MAX_PROFILES), i;
+
+                fprintf(stderr, "clumsy: --profile %s is not in profiles.json. ", profileName);
+                if (cnt == 0) {
+                    fprintf(stderr, "No profiles are saved yet; create one with "
+                                    "POST /api/profiles or the dashboard, or pass the "
+                                    "module options directly.\n");
+                } else {
+                    fprintf(stderr, "Saved profiles:");
+                    for (i = 0; i < cnt; ++i) fprintf(stderr, " %s", names[i]);
+                    fprintf(stderr, "\n");
+                }
+                return EXIT_BAD_USAGE;
+            }
         }
     }
 
@@ -775,13 +1103,18 @@ int main(int argc, char* argv[]) {
     if (argGet("filter")) {
         char err[MSG_BUFSIZE] = "";
         if (!appStartCapture(argGet("filter"), argGet("process"), err, sizeof(err))) {
+            // --filter is a request to capture now. Idling with the dashboard
+            // up is right when no filter was given, but here it would leave a
+            // script waiting out its whole --timeout on a clumsy that shapes
+            // nothing and then exits 0. Fail the run instead.
             INFO("Failed to start capture: %s", err);
+            exitCode = EXIT_START_FAILED;
         }
     }
 
     // Replay is independent of capture: it can feed a recorded session back
     // onto the wire with no filter set at all.
-    if (argGet("replay-in")) {
+    if (argGet("replay-in") && exitCode == 0) {
         char err[MSG_BUFSIZE] = "";
         const char *speedArg = argGet("replay-speed");
         double speed = speedArg ? atof(speedArg) : 1.0;
@@ -789,7 +1122,13 @@ int main(int argc, char* argv[]) {
                              parseBoolValue(argGet("replay-loop")),
                              err, sizeof(err))) {
             INFO("Failed to start replay: %s", err);
+            exitCode = EXIT_START_FAILED;
         }
+    }
+
+    if (exitCode != 0) {
+        INFO("Exiting with code %d; nothing is being shaped.", exitCode);
+        appRequestQuit();   // skips the tick loop and runs the normal cleanup
     }
 
     timeoutSec      = argGetInt("timeout", 0);
@@ -854,5 +1193,5 @@ int main(int argc, char* argv[]) {
     endTimePeriod();
     DeleteCriticalSection(&appLock);
     INFO("clumsy exited.");
-    return 0;
+    return exitCode;
 }

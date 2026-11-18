@@ -198,6 +198,67 @@ has "$(get /api/report)" 'Delay distribution' \
   && ok "report contains the delay distribution section" || bad "report missing latency section"
 
 echo
+echo "########## 9. replies a script or an AI agent can act on ##########"
+# A wrong path or method must still answer in JSON: a client that parses every
+# reply would otherwise fail on the one reply that tells it what it got wrong.
+R="$(get /api/stop)"
+[ "$(code /api/stop)" = 404 ] && has "$R" '"status":"error"' && has "$R" 'POST' \
+  && ok "a GET on a POST-only endpoint is a JSON error that says so" \
+  || bad "unknown endpoint reply is not actionable JSON" "$R"
+
+# Out of range: applied, but the reply has to show the value that is in effect.
+R="$(post /api/modules/lag '{"lag-time":99999}')"
+has "$R" '"warnings":[' && has "$R" '"lag-time":"15000"' \
+  && ok "a clamped value is reported, with the value actually in effect" \
+  || bad "clamping was silent" "$R"
+# Unusable: must not be coerced into some other setting and reported as ok.
+post /api/modules/jitter '{"jitter-dist":"normal"}' >/dev/null
+R="$(post /api/modules/jitter '{"jitter-dist":"gaussian"}')"
+[ "$(pcode /api/modules/jitter '{"jitter-dist":"gaussian"}')" = 400 ] \
+  && has "$R" 'uniform,normal,pareto' && has "$(get /api/modules)" '"jitter-dist":"normal"' \
+  && ok "an unknown enum name is refused, with the choices, and the old value stays" \
+  || bad "bad enum value was applied or not reported" "$R"
+post /api/modules/jitter '{"jitter-dist":"uniform"}' >/dev/null
+post /api/modules/lag '{"lag-time":50}' >/dev/null
+# A request made only of names no module has changed nothing, and "ok" with
+# "applied":0 reads as success to anything that checks the status alone.
+R="$(post /api/apply '{"latency":150,"loss":5}')"
+[ "$(pcode /api/apply '{"latency":150,"loss":5}')" = 400 ] && has "$R" 'latency' \
+  && ok "a request that applied nothing is a 400 naming the keys" \
+  || bad "an all-unknown request was reported as ok" "$R"
+
+# The steps as a real JSON array, which is what a client sends unprompted.
+R="$(post /api/scenario/loadinline '{"scenario":[{"at":0,"lag":true},{"at":5,"lag":false}]}')"
+has "$R" '"steps":2' && ok "a scenario sent as a JSON array is accepted" \
+  || bad "array-form scenario rejected" "$R"
+
+# A mistyped scenario key only shows on the console when its step fires, long
+# after the client that loaded it has moved on - so it is reported at load.
+R="$(post /api/scenario/loadinline '{"scenario":"[{\"at\":0,\"lag\":true,\"lag-ms\":80}]"}')"
+has "$R" '"warnings":[' && has "$R" 'lag-ms' \
+  && ok "scenario load reports a key no module has" || bad "scenario typo went unreported" "$R"
+
+# The agent guides are hand-written, so they are the one reference that can
+# drift from the code - and there are two of them, English and Korean, which
+# can also drift from each other. Every parameter the modules publish has to
+# appear in both.
+KEYS="$(get /api/modules | grep -o '"key":"[a-z-]*"' | cut -d'"' -f4 | grep -Ev -- '-(inbound|outbound)$')"
+for doc in /llms.txt /llms_kr.txt; do
+  GUIDE="$(get "$doc")"
+  MISSING=""
+  for k in $KEYS; do has "$GUIDE" "$k" || MISSING="$MISSING $k"; done
+  [ "$(code "$doc")" = 200 ] && [ -z "$MISSING" ] \
+    && ok "$doc is served and documents every module parameter" \
+    || bad "$doc is missing or incomplete" "missing:$MISSING"
+done
+
+# The command line is checked before anything starts, so this runs (and fails)
+# while the instance above still holds the single-instance claim.
+./clumsy --lag-ms 100 >/dev/null 2>&1; RC=$?
+[ "$RC" = 2 ] && ok "an unknown command line option exits with code 2" \
+  || bad "unknown option was accepted" "exit code $RC"
+
+echo
 echo "########## shutting down ##########"
 post /api/quit '' >/dev/null
 for _ in $(seq 1 20); do kill -0 $CLUMSY_PID 2>/dev/null || break; sleep 0.3; done
