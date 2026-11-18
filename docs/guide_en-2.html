@@ -1,0 +1,1451 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>clumsy Guide</title>
+<meta name="description" content="A beginner's guide to clumsy: deliberately add delay, loss and corruption to your own PC's traffic to reproduce a bad network">
+<link rel="alternate" hreflang="ko" href="guide.html">
+<script>
+(function(){
+  try{
+    var t = localStorage.getItem('clumsy-guide-theme') || 'auto';
+    if(t==='light') document.documentElement.setAttribute('data-theme','light');
+    else if(t==='dark') document.documentElement.setAttribute('data-theme','dark');
+  }catch(e){}
+})();
+</script>
+<style>
+*,*::before,*::after{box-sizing:border-box;}
+html{scroll-behavior:smooth;}
+:root{
+  --bg:#f4f5fa; --bg-soft:#eaecf4; --surface:#ffffff; --surface-2:#f7f8fc;
+  --border:#e1e4ee; --text:#1a1d29; --text-dim:#565c70; --text-faint:#8890a3;
+  --accent:#4a5cf6; --accent-ink:#ffffff; --accent-soft:#eceeff;
+  --danger:#e6435e; --danger-soft:#fdeaee;
+  --good:#1fa971; --good-soft:#e5f7ee;
+  --warn:#e08e14; --warn-soft:#fdf1de;
+  --purple:#8452e0; --purple-soft:#f1eafd;
+  --teal:#0a9a95; --teal-soft:#e1f6f4;
+  --code-bg:#eef0f7; --code-text:#262a38; --code-border:#dde1ee;
+  --shadow:0 1px 2px rgba(20,25,45,.05), 0 10px 28px rgba(20,25,45,.07);
+  --radius:14px;
+  --maxw:1080px;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#0d0f16; --bg-soft:#12141d; --surface:#171a25; --surface-2:#1c202c;
+    --border:#2b3040; --text:#e7e9f2; --text-dim:#a3a9bd; --text-faint:#727890;
+    --accent:#8296ff; --accent-ink:#0d0f16; --accent-soft:#232744;
+    --danger:#ff6f87; --danger-soft:#3a1c26;
+    --good:#3ddb96; --good-soft:#123526;
+    --warn:#f2b33f; --warn-soft:#3a2c10;
+    --purple:#b09bff; --purple-soft:#2a2246;
+    --teal:#3fd6cf; --teal-soft:#0f2f2d;
+    --code-bg:#11131b; --code-text:#d9dcea; --code-border:#2b3040;
+    --shadow:0 1px 2px rgba(0,0,0,.3), 0 10px 28px rgba(0,0,0,.4);
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#0d0f16; --bg-soft:#12141d; --surface:#171a25; --surface-2:#1c202c;
+  --border:#2b3040; --text:#e7e9f2; --text-dim:#a3a9bd; --text-faint:#727890;
+  --accent:#8296ff; --accent-ink:#0d0f16; --accent-soft:#232744;
+  --danger:#ff6f87; --danger-soft:#3a1c26;
+  --good:#3ddb96; --good-soft:#123526;
+  --warn:#f2b33f; --warn-soft:#3a2c10;
+  --purple:#b09bff; --purple-soft:#2a2246;
+  --teal:#3fd6cf; --teal-soft:#0f2f2d;
+  --code-bg:#11131b; --code-text:#d9dcea; --code-border:#2b3040;
+  --shadow:0 1px 2px rgba(0,0,0,.3), 0 10px 28px rgba(0,0,0,.4);
+}
+body{
+  margin:0; background:var(--bg); color:var(--text);
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Pretendard,"Malgun Gothic",Roboto,sans-serif;
+  line-height:1.65; -webkit-font-smoothing:antialiased;
+}
+img,svg{max-width:100%;}
+a{color:var(--accent);}
+.container{max-width:var(--maxw); margin:0 auto; padding:0 20px;}
+section{padding:72px 0; border-bottom:1px solid var(--border); scroll-margin-top:76px;}
+section:last-of-type{border-bottom:none;}
+h1,h2,h3,h4{line-height:1.3; font-weight:800; letter-spacing:-.01em;}
+h2{font-size:clamp(22px,3vw,30px); margin:0 0 8px;}
+h3{font-size:19px; margin:0 0 6px;}
+.section-kicker{display:inline-block; font-size:12.5px; font-weight:700; letter-spacing:.06em; color:var(--accent); text-transform:uppercase; margin-bottom:10px;}
+.section-desc{color:var(--text-dim); max-width:680px; margin:0 0 36px; font-size:15.5px;}
+p{color:var(--text-dim);}
+strong{color:var(--text);}
+code{font-family:ui-monospace,SFMono-Regular,Consolas,"Liberation Mono",Menlo,monospace; background:var(--code-bg); color:var(--code-text); padding:.15em .4em; border-radius:5px; font-size:.9em; border:1px solid var(--code-border);}
+
+/* ---------- header ---------- */
+.topbar{position:sticky; top:0; z-index:50; background:color-mix(in srgb, var(--bg) 88%, transparent); backdrop-filter:blur(10px); border-bottom:1px solid var(--border);}
+.topbar-inner{max-width:var(--maxw); margin:0 auto; padding:12px 20px; display:flex; align-items:center; gap:18px; flex-wrap:wrap;}
+.brand{display:flex; align-items:baseline; gap:6px; font-weight:800; font-size:17px; color:var(--text); text-decoration:none; white-space:nowrap;}
+.brand em{font-style:normal; font-weight:600; color:var(--text-faint); font-size:13px;}
+.topnav{display:flex; gap:4px; flex-wrap:wrap; flex:1;}
+.topnav a{color:var(--text-dim); text-decoration:none; font-size:13.5px; font-weight:600; padding:7px 10px; border-radius:8px; white-space:nowrap;}
+.topnav a:hover{background:var(--surface-2); color:var(--text);}
+.theme-btn{border:1px solid var(--border); background:var(--surface); color:var(--text); font-size:13px; font-weight:700; padding:7px 12px; border-radius:20px; cursor:pointer; white-space:nowrap;}
+.theme-btn:hover{border-color:var(--accent);}
+
+/* ---------- hero ---------- */
+.hero{padding-top:56px;}
+.eyebrow{display:inline-block; background:var(--accent-soft); color:var(--accent); font-weight:700; font-size:12.5px; padding:5px 12px; border-radius:20px; margin-bottom:16px;}
+.hero h1{font-size:clamp(28px,4.4vw,44px); margin:0 0 18px; max-width:780px;}
+.accent-text{color:var(--accent);}
+.hero .lead{font-size:16.5px; max-width:660px; margin:0 0 28px;}
+.hero-cta{display:flex; gap:12px; flex-wrap:wrap; margin-bottom:48px;}
+.btn{display:inline-flex; align-items:center; gap:6px; text-decoration:none; font-weight:700; font-size:14.5px; padding:12px 20px; border-radius:11px; border:1px solid transparent; cursor:pointer;}
+.btn-primary{background:var(--accent); color:var(--accent-ink);}
+.btn-primary:hover{opacity:.9;}
+.btn-ghost{background:var(--surface); color:var(--text); border-color:var(--border);}
+.btn-ghost:hover{border-color:var(--accent); color:var(--accent);}
+
+/* summary cards */
+.summary-grid{display:grid; grid-template-columns:repeat(3,1fr); gap:16px; margin-bottom:56px;}
+.summary-card{background:var(--surface); border:1px solid var(--border); border-radius:var(--radius); padding:20px; box-shadow:var(--shadow);}
+.summary-card .ico{font-size:22px;}
+.summary-card h4{margin:10px 0 6px; font-size:15.5px;}
+.summary-card p{margin:0; font-size:13.8px; color:var(--text-dim);}
+
+/* architecture diagram */
+.arch{position:relative; background:var(--surface); border:1px solid var(--border); border-radius:20px; padding:34px 24px 26px; box-shadow:var(--shadow); overflow:hidden;}
+.arch-row{display:flex; align-items:center; justify-content:space-between; gap:10px; position:relative; z-index:2;}
+.arch-box{flex:1; text-align:center; background:var(--surface-2); border:1px solid var(--border); border-radius:14px; padding:18px 10px; min-width:0;}
+.arch-box .emoji{font-size:26px; display:block; margin-bottom:6px;}
+.arch-box b{display:block; font-size:14px;}
+.arch-box span{display:block; font-size:12px; color:var(--text-faint); margin-top:3px;}
+.arch-box.mid{background:var(--accent-soft); border-color:color-mix(in srgb, var(--accent) 40%, var(--border));}
+.arch-arrow{font-size:20px; color:var(--text-faint); flex:none;}
+.arch-track{position:absolute; left:12%; right:12%; top:56px; height:2px; background:var(--border); z-index:1;}
+.arch-dot{position:absolute; top:50px; width:12px; height:12px; border-radius:4px; background:var(--accent); z-index:3; animation:arch-fly 3.2s linear infinite;}
+@keyframes arch-fly{
+  0%{left:0%; background:var(--accent); transform:rotate(0deg);}
+  38%{left:38%; background:var(--accent);}
+  42%{background:var(--warn); transform:rotate(20deg) scale(1.3);}
+  58%{background:var(--warn); transform:rotate(-15deg) scale(1.15);}
+  62%{left:62%; background:var(--accent); transform:rotate(0deg) scale(1);}
+  100%{left:100%; background:var(--accent);}
+}
+.arch-steps{display:grid; grid-template-columns:repeat(3,1fr); gap:12px; margin-top:22px; position:relative; z-index:2;}
+.arch-steps div{font-size:12.5px; color:var(--text-faint); text-align:center;}
+.arch-steps b{color:var(--text-dim); font-weight:700;}
+@media (max-width:720px){
+  .summary-grid{grid-template-columns:1fr;}
+  .arch-row{flex-direction:column;}
+  .arch-arrow{transform:rotate(90deg);}
+  .arch-track{display:none;}
+}
+
+/* ---------- generic pieces reused below ---------- */
+.callout{border-radius:12px; padding:16px 18px; font-size:14px; margin:18px 0; border:1px solid; display:flex; gap:10px;}
+.callout .ico{flex:none; font-size:17px;}
+.callout p{margin:0; color:inherit;}
+.callout-info{background:var(--accent-soft); border-color:color-mix(in srgb, var(--accent) 35%, var(--border)); color:var(--text);}
+.callout-warn{background:var(--warn-soft); border-color:color-mix(in srgb, var(--warn) 45%, var(--border)); color:var(--text);}
+.callout-danger{background:var(--danger-soft); border-color:color-mix(in srgb, var(--danger) 45%, var(--border)); color:var(--text);}
+.callout strong{color:var(--text);}
+
+.persona-grid{display:grid; grid-template-columns:repeat(4,1fr); gap:14px; margin-top:28px;}
+.persona{background:var(--surface); border:1px solid var(--border); border-radius:12px; padding:16px 14px; text-align:center;}
+.persona .ico{font-size:24px; display:block; margin-bottom:8px;}
+.persona b{display:block; font-size:13.5px;}
+.persona span{display:block; font-size:12px; color:var(--text-faint); margin-top:4px;}
+
+.install-grid{display:grid; grid-template-columns:repeat(2,1fr); gap:16px; margin:18px 0;}
+.install-card{position:relative; background:var(--surface); border:1px solid var(--border); border-radius:14px; padding:20px 18px; box-shadow:var(--shadow);}
+.install-card .ico{font-size:24px; display:block; margin-bottom:8px;}
+.install-card h4{margin:0 0 6px; font-size:15px;}
+.install-card p{margin:0; font-size:13.4px;}
+.badge-rec,.badge-adv{position:absolute; top:16px; right:16px; font-size:10.5px; font-weight:800; padding:3px 9px; border-radius:20px; white-space:nowrap;}
+.badge-rec{background:var(--good-soft); color:var(--good);}
+.badge-adv{background:var(--warn-soft); color:var(--warn);}
+@media (max-width:640px){ .install-grid{grid-template-columns:1fr;} }
+
+.map-table{width:100%; border-collapse:collapse; margin-top:10px; font-size:13.8px;}
+.map-table th,.map-table td{text-align:left; padding:10px 12px; border-bottom:1px solid var(--border); vertical-align:top;}
+.map-table th{color:var(--text-faint); font-size:12px; text-transform:uppercase; letter-spacing:.04em; font-weight:700;}
+.map-table td b{color:var(--text);}
+.map-table .tagmini{display:inline-block; background:var(--accent-soft); color:var(--accent); font-size:11.5px; font-weight:700; padding:2px 8px; border-radius:20px; margin:2px 4px 0 0;}
+
+.steps{counter-reset:step; list-style:none; margin:24px 0 0; padding:0; display:grid; gap:14px;}
+.steps li{position:relative; padding-left:44px; background:var(--surface); border:1px solid var(--border); border-radius:12px; padding-top:14px; padding-bottom:14px; padding-right:16px;}
+.steps li::before{counter-increment:step; content:counter(step); position:absolute; left:14px; top:14px; width:22px; height:22px; border-radius:50%; background:var(--accent); color:var(--accent-ink); font-size:12px; font-weight:800; display:grid; place-items:center;}
+.steps li b{display:block; font-size:14.5px; margin-bottom:3px;}
+.steps li p{margin:0; font-size:13.6px;}
+
+.console{background:#0c0e14; color:#c9d1e0; border-radius:12px; padding:16px 18px; font-family:ui-monospace,SFMono-Regular,Consolas,monospace; font-size:12.8px; line-height:1.7; overflow-x:auto; border:1px solid #1e2230;}
+.console .g{color:#6ee7a0;}
+.console .y{color:#f4c95d;}
+.console .d{color:#7c85a3;}
+
+.two-col{display:grid; grid-template-columns:1.05fr .95fr; gap:32px; align-items:start;}
+@media (max-width:820px){ .two-col{grid-template-columns:1fr;} .persona-grid{grid-template-columns:repeat(2,1fr);} }
+
+.code-block{position:relative; background:var(--code-bg); border:1px solid var(--code-border); border-radius:12px; padding:14px 16px; margin:14px 0; overflow-x:auto;}
+.code-block pre{margin:0; white-space:pre-wrap; word-break:break-word; font-family:ui-monospace,SFMono-Regular,Consolas,monospace; font-size:12.6px; color:var(--code-text); line-height:1.6;}
+.copy-btn{position:absolute; top:8px; right:8px; font-size:11px; font-weight:700; padding:4px 9px; border-radius:7px; border:1px solid var(--code-border); background:var(--surface); color:var(--text-dim); cursor:pointer;}
+.copy-btn:hover{color:var(--accent); border-color:var(--accent);}
+
+/* ---------- dashboard mockup ---------- */
+.mockwin{background:var(--surface); border:1px solid var(--border); border-radius:16px; box-shadow:var(--shadow); overflow:hidden;}
+.mockwin-bar{display:flex; align-items:center; gap:8px; padding:10px 14px; background:var(--surface-2); border-bottom:1px solid var(--border);}
+.mockwin-bar .dot{width:9px; height:9px; border-radius:50%; display:inline-block;}
+.mockwin-bar .dot.r{background:#ff6058;} .mockwin-bar .dot.y{background:#ffbd2e;} .mockwin-bar .dot.g{background:#28c941;}
+.mockwin-url{margin-left:8px; font-size:11.5px; color:var(--text-faint); background:var(--surface); border:1px solid var(--border); border-radius:20px; padding:3px 12px; font-family:ui-monospace,monospace;}
+.mockwin-body{padding:16px; display:grid; gap:12px;}
+.mock-section{position:relative; border:1px dashed var(--border); border-radius:10px; padding:12px 14px 14px;}
+.mock-section::before{content:attr(data-badge); position:absolute; top:-11px; left:-11px; width:24px; height:24px; border-radius:50%; background:var(--accent); color:var(--accent-ink); font-size:12px; font-weight:800; display:grid; place-items:center; box-shadow:0 2px 5px rgba(0,0,0,.2);}
+.mock-label{font-size:10.5px; font-weight:800; letter-spacing:.06em; color:var(--text-faint); margin-bottom:8px;}
+.mock-row{display:flex; gap:8px; flex-wrap:wrap; align-items:center;}
+.mock-input{background:var(--surface-2); border:1px solid var(--border); border-radius:7px; padding:6px 10px; font-size:11.5px; color:var(--text-dim); font-family:ui-monospace,monospace;}
+.mock-input.small{padding:4px 8px; width:54px; text-align:center;}
+.mock-btn{background:var(--surface-2); border:1px solid var(--border); border-radius:7px; padding:6px 12px; font-size:11.5px; font-weight:700; color:var(--text-dim);}
+.mock-btn.primary{background:var(--accent); color:var(--accent-ink); border-color:transparent;}
+.mock-stats{display:flex; gap:8px; flex-wrap:wrap; margin-bottom:10px;}
+.mock-chip{background:var(--accent-soft); color:var(--accent); font-size:11px; font-weight:700; padding:5px 10px; border-radius:8px;}
+.mock-chip b{font-weight:800;}
+.mock-graph{height:34px; border-radius:7px; background:linear-gradient(180deg, color-mix(in srgb, var(--accent) 18%, transparent), transparent); position:relative; overflow:hidden; border:1px solid var(--border);}
+.mock-graph::after{content:""; position:absolute; inset:0; background:
+  linear-gradient(90deg, transparent 0 8%, var(--accent) 8% 9%, transparent 9% 20%, var(--accent) 20% 21%, transparent 21% 34%, var(--accent) 34% 35%, transparent 35% 44%, var(--accent) 44% 45%, transparent 45% 60%, var(--accent) 60% 61%, transparent 61% 72%, var(--accent) 72% 73%, transparent 73% 88%, var(--accent) 88% 89%, transparent 89% 100%);
+  opacity:.55;}
+.mock-module{display:flex; align-items:center; gap:8px; padding:5px 0; font-size:12px; color:var(--text-dim);}
+.mock-check{width:14px; height:14px; border-radius:4px; border:2px solid var(--border); flex:none;}
+.mock-check.on{background:var(--accent); border-color:var(--accent);}
+.mock-spark{width:44px; height:14px; border-radius:3px; background:repeating-linear-gradient(90deg, var(--accent) 0 2px, transparent 2px 5px); opacity:.5; margin-left:auto;}
+
+.mock-legend{list-style:none; margin:22px 0 0; padding:0; display:grid; gap:10px;}
+.mock-legend li{display:flex; gap:10px; font-size:13.5px; color:var(--text-dim); align-items:flex-start;}
+.mock-legend b{flex:none; width:22px; height:22px; border-radius:50%; background:var(--accent); color:var(--accent-ink); font-size:11.5px; display:grid; place-items:center; font-weight:800;}
+
+.filter-grid{display:grid; grid-template-columns:repeat(2,1fr); gap:10px; margin:18px 0;}
+.filter-chip{background:var(--surface); border:1px solid var(--border); border-radius:10px; padding:10px 13px;}
+.filter-chip code{display:block; background:none; border:none; padding:0; font-size:12.6px; margin-bottom:4px; word-break:break-all;}
+.filter-chip span{font-size:12.2px; color:var(--text-faint);}
+@media (max-width:640px){ .filter-grid{grid-template-columns:1fr;} }
+
+/* ---------- modules ---------- */
+.cat-bar{display:flex; gap:8px; flex-wrap:wrap; margin-bottom:28px;}
+.cat-btn{border:1px solid var(--border); background:var(--surface); color:var(--text-dim); font-size:13px; font-weight:700; padding:7px 14px; border-radius:20px; cursor:pointer;}
+.cat-btn.active{background:var(--accent); border-color:transparent; color:var(--accent-ink);}
+.mod-grid{display:grid; grid-template-columns:repeat(2,1fr); gap:20px;}
+@media (max-width:860px){ .mod-grid{grid-template-columns:1fr;} }
+.mod-card{background:var(--surface); border:1px solid var(--border); border-radius:16px; padding:18px; box-shadow:var(--shadow); display:flex; flex-direction:column; transition:opacity .15s, transform .15s;}
+.mod-card.is-hidden{display:none;}
+.mod-card__head{display:flex; align-items:center; gap:9px; margin-bottom:2px; flex-wrap:wrap;}
+.mod-card__head h3{margin:0;}
+.mod-card__kr{font-size:13px; font-weight:600; color:var(--text-faint);}
+.tag{font-size:10.5px; font-weight:800; letter-spacing:.03em; padding:3px 9px; border-radius:20px; text-transform:uppercase;}
+.tag-delay{background:var(--accent-soft); color:var(--accent);}
+.tag-loss{background:var(--danger-soft); color:var(--danger);}
+.tag-mutate{background:var(--purple-soft); color:var(--purple);}
+.tag-conn{background:var(--teal-soft); color:var(--teal);}
+.mod-card__desc{font-size:13.6px; margin:6px 0 12px;}
+.param-table{width:100%; border-collapse:collapse; font-size:12.4px; margin-bottom:12px;}
+.param-table th,.param-table td{text-align:left; padding:6px 8px; border-bottom:1px solid var(--border);}
+.param-table th{color:var(--text-faint); font-weight:700; font-size:11px; text-transform:uppercase;}
+.param-table td:first-child{font-family:ui-monospace,monospace; color:var(--text); white-space:nowrap;}
+.mod-when{font-size:12.8px; background:var(--surface-2); border-radius:9px; padding:9px 12px; margin-bottom:10px;}
+.mod-when b{color:var(--text);}
+.mod-card .code-block{margin:0; font-size:11.8px;}
+.mod-card .code-block pre{font-size:11.6px;}
+
+/* demo component shared by most modules */
+.demo{position:relative; height:96px; border-radius:12px; background:var(--surface-2); border:1px solid var(--border); margin-bottom:14px; overflow:hidden;}
+.demo .node{position:absolute; top:18px; width:32px; height:32px; border-radius:50%; background:var(--surface); border:2px solid var(--border); display:grid; place-items:center; font-size:16px; z-index:3;}
+.demo .node.pc{left:2px;} .demo .node.srv{right:2px;}
+.demo .lane{position:absolute; top:33px; left:38px; right:38px; height:2px; background:var(--border); z-index:1;}
+.demo .packet{position:absolute; top:29px; left:9%; width:11px; height:11px; margin:0; border-radius:3px; background:var(--accent); z-index:2; animation:pkt-fly 2.8s linear infinite;}
+.demo .demo-cap{position:absolute; left:8px; right:8px; bottom:6px; margin:0; font-size:11px; color:var(--text-faint); text-align:center; z-index:4;}
+@keyframes pkt-fly{ 0%{left:9%; opacity:1;} 100%{left:87%; opacity:1;} }
+
+/* lag: everyone pauses at the same spot for the same time */
+@keyframes pkt-lag{ 0%{left:9%;} 34%{left:42%;} 56%{left:42%;} 100%{left:87%;} }
+.demo-lag .packet{animation-name:pkt-lag; animation-duration:3.1s;}
+.demo-lag .p1{animation-delay:0s;} .demo-lag .p2{animation-delay:.9s;} .demo-lag .p3{animation-delay:1.8s;} .demo-lag .p4{animation-delay:2.7s;}
+
+/* jitter: each packet a different speed -> irregular, can overtake */
+.demo-jitter .p1{animation:pkt-fly 1.7s linear infinite; animation-delay:0s;}
+.demo-jitter .p2{animation:pkt-fly 2.9s linear infinite; animation-delay:.3s;}
+.demo-jitter .p3{animation:pkt-fly 2.0s linear infinite; animation-delay:1.1s;}
+.demo-jitter .p4{animation:pkt-fly 3.3s linear infinite; animation-delay:1.6s;}
+
+/* drop: some packets flash and vanish mid-path */
+@keyframes pkt-drop{
+  0%{left:9%; opacity:1; background:var(--accent); transform:scale(1);}
+  50%{left:48%; opacity:1; background:var(--accent); transform:scale(1);}
+  58%{left:50%; opacity:1; background:var(--danger); transform:scale(1.5);}
+  67%{opacity:0; transform:scale(.2);}
+  100%{opacity:0;}
+}
+.demo-drop .p1{animation:pkt-fly 2.6s linear infinite; animation-delay:0s;}
+.demo-drop .p2{animation:pkt-drop 2.6s linear infinite; animation-delay:.65s;}
+.demo-drop .p3{animation:pkt-fly 2.6s linear infinite; animation-delay:1.3s;}
+.demo-drop .p4{animation:pkt-drop 2.6s linear infinite; animation-delay:1.95s;}
+
+/* burst loss: traveling window of red chips over a packet stream */
+.demo-burst .stream{position:absolute; inset:0; display:flex; align-items:center; gap:4px; padding:0 12px; z-index:2;}
+.demo-burst .chip{width:12px; height:26px; border-radius:3px; background:var(--good); flex:none; animation:chip-state 4.2s linear infinite;}
+@keyframes chip-state{ 0%,58%{background:var(--good); transform:scaleY(1);} 63%,80%{background:var(--danger); transform:scaleY(.6);} 85%,100%{background:var(--good); transform:scaleY(1);} }
+
+/* blackout: periodic full-block overlay flashes over the pipe */
+.demo-blackout .overlay{position:absolute; inset:0; z-index:4; display:grid; place-items:center; background:color-mix(in srgb, var(--danger) 14%, transparent); opacity:0; animation:blackout-cycle 6s linear infinite;}
+.demo-blackout .overlay span{background:var(--danger); color:#fff; font-size:10.5px; font-weight:800; padding:3px 10px; border-radius:20px;}
+@keyframes blackout-cycle{ 0%,68%{opacity:0;} 72%,90%{opacity:1;} 94%,100%{opacity:0;} }
+.demo-blackout .p1{animation-delay:0s;} .demo-blackout .p2{animation-delay:.9s;} .demo-blackout .p3{animation-delay:1.8s;} .demo-blackout .p4{animation-delay:2.7s;}
+
+/* throttle: packets bunch up then release together in a burst */
+@keyframes pkt-throttle{ 0%{left:9%;} 32%{left:39%;} 58%{left:41%;} 100%{left:87%;} }
+.demo-throttle .packet{animation-name:pkt-throttle; animation-duration:3.0s;}
+.demo-throttle .p1{animation-delay:0s;} .demo-throttle .p2{animation-delay:.25s;} .demo-throttle .p3{animation-delay:.5s;} .demo-throttle .p4{animation-delay:.75s;}
+
+/* duplicate: a clone pops out mid-path and travels alongside */
+@keyframes pkt-clone{ 0%{left:46%; opacity:0; top:29px;} 3%{opacity:1;} 100%{left:87%; opacity:1; top:20px;} }
+.demo-dup .p1{animation:pkt-fly 2.6s linear infinite; animation-delay:0s;}
+.demo-dup .p1c{animation:pkt-clone 2.6s linear infinite; animation-delay:0s; background:var(--purple);}
+.demo-dup .p2{animation:pkt-fly 2.6s linear infinite; animation-delay:1.3s;}
+.demo-dup .p2c{animation:pkt-clone 2.6s linear infinite; animation-delay:1.3s; background:var(--purple);}
+
+/* out of order: numbered chips, a later starter overtakes an earlier one */
+.demo-ood .packet{width:20px; height:20px; top:23px; border-radius:6px; color:#fff; font-size:10.5px; font-weight:800; display:grid; place-items:center;}
+.demo-ood .p1{background:var(--accent); animation:pkt-fly 3.3s linear infinite; animation-delay:0s;}
+.demo-ood .p2{background:var(--purple); animation:pkt-fly 2.0s linear infinite; animation-delay:.6s;}
+.demo-ood .p3{background:var(--teal); animation:pkt-fly 2.7s linear infinite; animation-delay:1.1s;}
+
+/* tamper: color/shape glitch once mid-flight, still arrives */
+@keyframes pkt-tamper{
+  0%{left:9%; background:var(--accent); border-radius:3px; transform:rotate(0);}
+  46%{left:45%; background:var(--accent); border-radius:3px; transform:rotate(0);}
+  50%{background:var(--warn); border-radius:1px; transform:rotate(20deg) scale(1.4);}
+  58%{transform:rotate(-12deg) scale(1.1);}
+  100%{left:87%; background:var(--warn); border-radius:2px; transform:rotate(0) scale(1);}
+}
+.demo-tamper .packet{animation-name:pkt-tamper; animation-duration:2.8s;}
+.demo-tamper .p1{animation-delay:0s;} .demo-tamper .p2{animation-delay:.9s;} .demo-tamper .p3{animation-delay:1.8s;}
+
+/* corrupt: travels smoothly but flickers noisily the whole way */
+@keyframes noise-flicker{ 0%,100%{background:var(--accent);} 25%{background:var(--danger);} 50%{background:var(--accent);} 75%{background:var(--warn);} }
+.demo-corrupt .packet{animation:pkt-fly 2.8s linear infinite, noise-flicker .3s steps(2) infinite;}
+.demo-corrupt .p1{animation-delay:0s,0s;} .demo-corrupt .p2{animation-delay:.9s,0s;} .demo-corrupt .p3{animation-delay:1.8s,0s;}
+
+/* reset: the connection line itself flashes red and "RST" pops */
+.demo-reset .lane{animation:lane-pulse 4s linear infinite; height:3px;}
+@keyframes lane-pulse{ 0%,70%{background:var(--good);} 75%,86%{background:var(--danger);} 90%,100%{background:var(--border);} }
+.demo-reset .rst-badge{position:absolute; top:50%; left:50%; translate:-50% -140%; background:var(--danger); color:#fff; font-size:11px; font-weight:800; padding:2px 9px; border-radius:20px; opacity:0; z-index:4; animation:rst-flash 4s linear infinite;}
+@keyframes rst-flash{ 0%,72%{opacity:0; translate:-50% -120%;} 78%,86%{opacity:1; translate:-50% -150%;} 92%,100%{opacity:0; translate:-50% -120%;} }
+
+/* bandwidth: pipe narrows in the middle, packets crawl through the gate */
+.demo-bw .gate{position:absolute; top:14px; left:calc(50% - 14px); width:28px; height:40px; z-index:1; border-left:2px dashed var(--warn); border-right:2px dashed var(--warn); background:color-mix(in srgb, var(--warn) 10%, transparent);}
+@keyframes pkt-bandwidth{ 0%{left:9%;} 40%{left:42%;} 72%{left:47%;} 100%{left:87%;} }
+.demo-bw .packet{animation-name:pkt-bandwidth; animation-duration:3.2s;}
+.demo-bw .p1{animation-delay:0s;} .demo-bw .p2{animation-delay:.5s;} .demo-bw .p3{animation-delay:1s;} .demo-bw .p4{animation-delay:1.5s;}
+
+/* ---------- scenarios ---------- */
+.scenario{background:var(--surface); border:1px solid var(--border); border-radius:14px; margin-bottom:12px; box-shadow:var(--shadow); overflow:hidden;}
+.scenario summary{list-style:none; cursor:pointer; padding:16px 18px; display:flex; align-items:center; gap:12px; font-weight:700; font-size:15px;}
+.scenario summary::-webkit-details-marker{display:none;}
+.scenario summary .ico{font-size:20px;}
+.scenario summary .sit{font-weight:500; color:var(--text-faint); font-size:13px; margin-left:auto; text-align:right; display:none;}
+.scenario summary .chev{font-size:13px; color:var(--text-faint); transition:transform .15s; flex:none;}
+.scenario[open] summary .chev{transform:rotate(90deg);}
+.scenario-body{padding:0 18px 20px; border-top:1px solid var(--border); padding-top:14px;}
+.scenario-body p.sit{color:var(--text-dim); font-size:13.8px; margin:0 0 12px;}
+@media (min-width:780px){ .scenario summary .sit{display:block;} }
+
+.tone-table{width:100%; border-collapse:collapse; font-size:12.6px; margin:14px 0; overflow-x:auto; display:block;}
+.tone-table th,.tone-table td{text-align:left; padding:7px 10px; border-bottom:1px solid var(--border); white-space:nowrap;}
+.tone-table th{color:var(--text-faint); font-weight:700; font-size:11px; text-transform:uppercase;}
+
+.ref-wrap{overflow-x:auto; margin-top:18px; border:1px solid var(--border); border-radius:12px;}
+.ref-table{width:100%; border-collapse:collapse; font-size:12.6px; min-width:640px;}
+.ref-table th,.ref-table td{text-align:left; padding:9px 12px; border-bottom:1px solid var(--border); white-space:nowrap;}
+.ref-table th{background:var(--surface-2); color:var(--text-faint); font-weight:700; font-size:11px; text-transform:uppercase;}
+.ref-table tr:last-child td{border-bottom:none;}
+
+/* ---------- cli / api tables ---------- */
+.opt-table{width:100%; border-collapse:collapse; font-size:12.8px;}
+.opt-table th,.opt-table td{text-align:left; padding:8px 10px; border-bottom:1px solid var(--border); vertical-align:top;}
+.opt-table th{color:var(--text-faint); font-weight:700; font-size:11px; text-transform:uppercase;}
+.opt-table td:first-child{font-family:ui-monospace,monospace; white-space:nowrap; color:var(--text);}
+.opt-group{margin-bottom:26px;}
+.opt-group h4{font-size:14px; margin:0 0 8px; color:var(--accent);}
+.api-table{width:100%; border-collapse:collapse; font-size:12.6px;}
+.api-table th,.api-table td{text-align:left; padding:8px 10px; border-bottom:1px solid var(--border); vertical-align:top;}
+.api-table th{color:var(--text-faint); font-weight:700; font-size:11px; text-transform:uppercase;}
+.api-table td:first-child{font-family:ui-monospace,monospace; white-space:nowrap;}
+.pill{display:inline-block; font-size:10px; font-weight:800; padding:2px 7px; border-radius:5px; margin-right:6px;}
+.pill-get{background:var(--good-soft); color:var(--good);}
+.pill-post{background:var(--warn-soft); color:var(--warn);}
+
+/* ---------- faq ---------- */
+.faq-item{border-bottom:1px solid var(--border); padding:16px 0;}
+.faq-item:first-child{padding-top:0;}
+.faq-item:last-child{border-bottom:none;}
+.faq-item summary{cursor:pointer; font-weight:700; font-size:14.5px; list-style:none; display:flex; gap:10px; align-items:center;}
+.faq-item summary::-webkit-details-marker{display:none;}
+.faq-item summary::before{content:"Q"; flex:none; width:22px; height:22px; border-radius:50%; background:var(--accent-soft); color:var(--accent); font-size:12px; font-weight:800; display:grid; place-items:center;}
+.faq-item p{margin:10px 0 0 32px; font-size:13.8px;}
+
+footer{padding:44px 0 60px; text-align:center;}
+footer p{font-size:12.8px; color:var(--text-faint); margin:0 0 6px;}
+footer .flinks{display:flex; gap:16px; justify-content:center; flex-wrap:wrap; margin-bottom:14px; font-size:13px;}
+.back-top{position:fixed; right:20px; bottom:20px; width:42px; height:42px; border-radius:50%; background:var(--surface); border:1px solid var(--border); box-shadow:var(--shadow); display:grid; place-items:center; text-decoration:none; color:var(--text); font-size:16px; opacity:0; pointer-events:none; transition:opacity .2s; z-index:40;}
+.back-top.show{opacity:1; pointer-events:auto;}
+</style>
+</head>
+<body>
+
+<header class="topbar">
+  <div class="topbar-inner">
+    <a class="brand" href="#top">🐢 clumsy <em>Guide</em></a>
+    <nav class="topnav">
+      <a href="#intro">Intro</a>
+      <a href="#start">Get started</a>
+      <a href="#dashboard">Dashboard</a>
+      <a href="#filter">Filters</a>
+      <a href="#modules">Effects</a>
+      <a href="#scenarios">Scenarios</a>
+      <a href="#cli">CLI</a>
+      <a href="#api">Automation</a>
+      <a href="#llm">AI agents</a>
+      <a href="#faq">Troubleshooting</a>
+    </nav>
+    <a class="theme-btn" href="guide.html" hreflang="ko" lang="ko" style="text-decoration:none;">한국어</a>
+    <button id="themeBtn" class="theme-btn" type="button">🌓 Auto</button>
+  </div>
+</header>
+
+<section class="hero" id="top">
+  <div class="container">
+    <span class="eyebrow">A beginner's guide to clumsy</span>
+    <h1>Create a <span class="accent-text">bad network</span><br>right inside your own computer</h1>
+    <p class="lead">clumsy grabs the network packets going in and out of your PC and deliberately <strong>delays, loses and mangles</strong> them.
+      Without touching a server or a router, you can reproduce "slow Wi-Fi", "patchy 4G on the subway" or
+      "a server on the other side of the planet" right here on this machine.</p>
+    <div class="hero-cta">
+      <a href="#start" class="btn btn-primary">Get started →</a>
+      <a href="#scenarios" class="btn btn-ghost">See usage examples first</a>
+    </div>
+
+    <div class="summary-grid">
+      <div class="summary-card">
+        <span class="ico">🤔</span>
+        <h4>Why would I need it?</h4>
+        <p>"It works fine on my home Wi-Fi, but customers say it acts up" — problems like this never show up on a good network. clumsy gives you a bad network whenever you want it, exactly as bad as you want it.</p>
+      </div>
+      <div class="summary-card">
+        <span class="ico">🧰</span>
+        <h4>What can it do?</h4>
+        <p>Delay (Lag, Jitter), loss (Drop, Burst Loss, Blackout), mutation (Duplicate, Tamper, Corrupt), bandwidth caps and forced disconnects — 12 effects in total that you can switch on in any combination.</p>
+      </div>
+      <div class="summary-card">
+        <span class="ico">🖱️</span>
+        <h4>How do I control it?</h4>
+        <p>There is no separate desktop app (GUI). You click your way through a single <strong>web dashboard</strong> in your browser, or automate everything from the command line (CLI) or the REST API.</p>
+      </div>
+    </div>
+
+    <div class="arch">
+      <div class="arch-track"></div>
+      <div class="arch-dot"></div>
+      <div class="arch-row">
+        <div class="arch-box"><span class="emoji">🖥️</span><b>Your program</b><span>game · app · browser</span></div>
+        <div class="arch-arrow">→</div>
+        <div class="arch-box mid"><span class="emoji">🛠️</span><b>clumsy</b><span>intercept → apply effects → resend</span></div>
+        <div class="arch-arrow">→</div>
+        <div class="arch-box"><span class="emoji">🌐</span><b>Remote server</b><span>across the internet</span></div>
+      </div>
+      <div class="arch-steps">
+        <div><b>① Intercept</b><br>A Windows driver (WinDivert) catches the packets passing through</div>
+        <div><b>② Apply effects</b><br>The modules you switched on add delay, loss and mutation, in order</div>
+        <div><b>③ Send on</b><br>Processed packets go out to wherever they were originally headed</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="intro">
+  <div class="container">
+    <span class="section-kicker">Intro</span>
+    <h2>So what exactly does clumsy do?</h2>
+    <p class="section-desc">In one sentence: <strong>it catches the packets your computer sends and receives, makes them worse on purpose, and sends them on.</strong>
+      It never touches real servers, routers or your carrier's network, so it affects nobody else — you experiment safely on <em>your own PC's traffic</em> only.</p>
+
+    <div class="two-col">
+      <div>
+        <h3>When it is exactly what you need</h3>
+        <table class="map-table">
+          <tr><th>What you are seeing</th><th>Effect to try</th></tr>
+          <tr><td>I want to reproduce an overseas server with constantly high ping</td><td><span class="tagmini">Lag</span></td></tr>
+          <tr><td>Wi-Fi is unstable and latency jumps around</td><td><span class="tagmini">Jitter</span></td></tr>
+          <tr><td>Packets go missing now and then and I want to check my retransmit logic</td><td><span class="tagmini">Drop</span></td></tr>
+          <tr><td>The connection cuts out for a stretch, like in a subway or tunnel</td><td><span class="tagmini">Burst Loss</span> <span class="tagmini">Blackout</span></td></tr>
+          <tr><td>I want to see whether reconnecting works after a complete disconnect</td><td><span class="tagmini">Blackout</span> <span class="tagmini">Reset</span></td></tr>
+          <tr><td>I want to be ready for duplicated or reordered packets</td><td><span class="tagmini">Duplicate</span> <span class="tagmini">Out of Order</span></td></tr>
+          <tr><td>I want to verify error handling for damaged or tampered data</td><td><span class="tagmini">Tamper</span> <span class="tagmini">Corrupt</span></td></tr>
+          <tr><td>I want to see how it behaves on a slow or congested link</td><td><span class="tagmini">Bandwidth</span></td></tr>
+        </table>
+      </div>
+      <div>
+        <h3>Who uses it</h3>
+        <div class="persona-grid" style="grid-template-columns:1fr; margin-top:16px;">
+          <div class="persona" style="text-align:left; display:flex; gap:12px; align-items:flex-start;">
+            <span class="ico" style="margin:0;">🎮</span>
+            <div><b>Game developers</b><span>See how ping, lag and reordered packets affect gameplay</span></div>
+          </div>
+          <div class="persona" style="text-align:left; display:flex; gap:12px; align-items:flex-start;">
+            <span class="ico" style="margin:0;">📱</span>
+            <div><b>Mobile app developers</b><span>Check behavior on poor connections like subways and elevators</span></div>
+          </div>
+          <div class="persona" style="text-align:left; display:flex; gap:12px; align-items:flex-start;">
+            <span class="ico" style="margin:0;">🧪</span>
+            <div><b>QA engineers</b><span>Reproduce hard-to-catch "it happens sometimes" bugs on demand</span></div>
+          </div>
+          <div class="persona" style="text-align:left; display:flex; gap:12px; align-items:flex-start;">
+            <span class="ico" style="margin:0;">🤖</span>
+            <div><b>CI/CD owners</b><span>Automate degraded-network tests with the REST API and scenario files</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <h3 style="margin-top:34px;">Install it on the client or on the server?</h3>
+    <p style="margin-top:-4px; font-size:13.8px; color:var(--text-dim); max-width:680px;">Short answer: <strong>on just one of them.</strong>
+      clumsy only intercepts <em>traffic going in and out of the PC it runs on</em> — you don't need to install or change anything on the other machine.</p>
+
+    <div class="install-grid">
+      <div class="install-card">
+        <span class="badge-rec">Most common</span>
+        <span class="ico">🖥️</span>
+        <h4>On the client (your PC)</h4>
+        <p>Reproduces the experience of "a user on a bad network". The server is healthy; only the packets your computer sends and receives get delayed or lost. Most scenarios in this guide work this way, and it is the easiest place for an individual developer to start.</p>
+      </div>
+      <div class="install-card">
+        <span class="badge-adv">Advanced</span>
+        <span class="ico">🖧</span>
+        <h4>On the server</h4>
+        <p>Use this when you want to see how many clients react when the server's own link is slow or congested. The server must run <strong>Windows</strong> and you need Administrator access to it. If the server runs Linux, use the Linux build (NFQUEUE-based) described in <code>docs/LINUX.md</code> (Korean) instead.</p>
+      </div>
+    </div>
+
+    <div class="callout callout-info">
+      <span class="ico">☝️</span>
+      <p><strong>You almost never need it on both sides.</strong> A single PC can control Inbound (receive) and Outbound (send) independently,
+      so for delay or loss on one client↔server connection, installing it on either side is enough. You only need both when you want to reproduce
+      <strong>two different problems at once</strong> — for example "the client is on bad Wi-Fi, and at the same time the server's link is congested".</p>
+    </div>
+
+    <div class="callout callout-warn">
+      <span class="ico">📎</span>
+      <p><strong>If you run the server and the client on the same PC (local development)</strong>, install clumsy on that one machine and use a loopback filter
+      (<code>udp and outbound and loopback</code>) — see <a href="#scenarios">Scenarios: local development testing</a>.
+      Be careful if your server runs inside <strong>WSL2</strong>, though: WSL2 uses its own network namespace, so clumsy installed on the Windows host
+      cannot touch the traffic of a server running inside WSL2.</p>
+    </div>
+
+    <div class="callout callout-info">
+      <span class="ico">💡</span>
+      <p><strong>Just remember there is no GUI window.</strong> When you run clumsy, a black console window appears. You don't operate it there —
+      you open the address printed in the console in your <strong>browser</strong> and work in the web dashboard. "Get started" below shows you how.</p>
+    </div>
+  </div>
+</section>
+
+<section id="start">
+  <div class="container">
+    <span class="section-kicker">Get started</span>
+    <h2>Your first delay in three minutes</h2>
+    <p class="section-desc">clumsy runs on Windows 7/8/10/11 (64-bit). Because it works with a network driver, it <strong>requires Administrator rights</strong>.
+      There is no installer: you just run <code>clumsy.exe</code>.</p>
+
+    <ol class="steps">
+      <li>
+        <b>① Open a console as Administrator</b>
+        <p>From the Start menu, <strong>run</strong> "Command Prompt" or "PowerShell" <strong>as administrator</strong>. clumsy loads a packet-intercepting driver (WinDivert), so it cannot start capturing with normal rights.</p>
+      </li>
+      <li>
+        <b>② Run clumsy.exe</b>
+        <p>Run without any options, it does not start capturing — it just brings up the dashboard and waits. You will see a banner like this.</p>
+        <div class="console">clumsy 0.4 - console + web network condition simulator<br>
+  Administrator : <span class="g">yes</span><br>
+  Web dashboard : <span class="y">http://127.0.0.1:8080/</span><br>
+  Named Pipe    : \\.\pipe\clumsy<br>
+  Presets       : 34 loaded<br>
+  Profiles      : 2 loaded<br>
+  <span class="d">Press Ctrl+C to quit.</span></div>
+      </li>
+      <li>
+        <b>③ Open the address from the banner in your browser</b>
+        <p>The default address is <code>http://127.0.0.1:8080/</code>. It is a local address that only opens on your own computer, so it works without an internet connection and nobody else can reach it.</p>
+      </li>
+      <li>
+        <b>④ Pick a filter in the dashboard and press Start</b>
+        <p>Choose which packets to catch (the filter) and press Start; capturing begins right then. The "Dashboard" section just below goes into the details.</p>
+      </li>
+      <li>
+        <b>⑤ Press Ctrl+C when you are done</b>
+        <p>Press <code>Ctrl+C</code> in the console window to shut down safely. Only one clumsy can run at a time, so if you launch it again while one is already running, the new instance exits on its own.</p>
+      </li>
+    </ol>
+
+    <div class="callout callout-warn">
+      <span class="ico">⚠️</span>
+      <p><strong>What if I run it without Administrator rights?</strong> The program doesn't quit; it prints a warning and the dashboard still comes up. But pressing Start in this state fails with
+      <code>clumsy needs Administrator rights to open the WinDivert driver.</code> and no capture starts.
+      Add <code>--elevate on</code> to the command line and clumsy will show a UAC prompt and relaunch itself as Administrator.</p>
+    </div>
+
+    <h3 style="margin-top:34px;">If you want to start straight from the command line</h3>
+    <p style="margin-top:-4px;">You can skip the dashboard and set the conditions as you launch. This example adds 100 ms of delay and 5% loss to outgoing UDP packets at the same time.</p>
+    <div class="code-block">
+      <button class="copy-btn" type="button">Copy</button>
+      <pre>clumsy.exe --filter "udp and outbound" --lag on --lag-time 100 --drop on --drop-chance 5.0</pre>
+    </div>
+    <p style="font-size:13.5px;">Each part of this command is explained one by one in the <a href="#filter">Filters section</a> and the <a href="#cli">CLI section</a>. For now, just remember that "you can turn it all on in a single line like this".</p>
+  </div>
+</section>
+
+<section id="dashboard">
+  <div class="container">
+    <span class="section-kicker">Web dashboard</span>
+    <h2>A screen you drive with a few clicks</h2>
+    <p class="section-desc">It is a <strong>single page</strong> that opens in your browser with nothing to install. It works as-is with no internet connection and no CDN.
+      The real page is five areas stacked from top to bottom — the picture below is a simplified sketch of that layout.</p>
+
+    <div class="mockwin">
+      <div class="mockwin-bar">
+        <span class="dot r"></span><span class="dot y"></span><span class="dot g"></span>
+        <div class="mockwin-url">http://127.0.0.1:8080/</div>
+      </div>
+      <div class="mockwin-body">
+        <div class="mock-section" data-badge="1">
+          <div class="mock-label">CAPTURE</div>
+          <div class="mock-row">
+            <div class="mock-input" style="flex:1; min-width:140px;">udp and outbound</div>
+            <div class="mock-btn primary">Start</div>
+            <div class="mock-btn">Stop</div>
+          </div>
+        </div>
+        <div class="mock-section" data-badge="2">
+          <div class="mock-label">LIVE STATISTICS</div>
+          <div class="mock-stats">
+            <div class="mock-chip">Captured <b>15,234</b></div>
+            <div class="mock-chip">Sent <b>15,102</b></div>
+            <div class="mock-chip">p95 <b>142ms</b></div>
+          </div>
+          <div class="mock-graph"></div>
+        </div>
+        <div class="mock-section" data-badge="3">
+          <div class="mock-label">MODULES</div>
+          <div class="mock-module"><span class="mock-check on"></span> Lag &nbsp;<span class="mock-input small">150</span><span class="mock-spark"></span></div>
+          <div class="mock-module"><span class="mock-check on"></span> Drop &nbsp;<span class="mock-input small">5.0</span></div>
+          <div class="mock-module"><span class="mock-check"></span> Blackout</div>
+        </div>
+        <div class="mock-section" data-badge="4">
+          <div class="mock-label">PROFILES · SCENARIO · CAPTURE FILE</div>
+          <div class="mock-row"><div class="mock-btn">Apply profile</div><div class="mock-btn">Load scenario</div><div class="mock-btn">Start dump</div></div>
+        </div>
+        <div class="mock-section" data-badge="5">
+          <div class="mock-label">SCENARIO EDITOR</div>
+          <div class="mock-row"><div class="mock-btn">+ Add step</div><div class="mock-btn primary">Load &amp; start</div></div>
+        </div>
+      </div>
+    </div>
+
+    <ul class="mock-legend">
+      <li><b>1</b><span><strong>Capture</strong> — type a filter for the packets to catch, or pick one from the presets, and switch capturing on and off with <code>Start</code>/<code>Stop</code>. The collapsible "Filter builder" lets you put a filter together without knowing the syntax.</span></li>
+      <li><b>2</b><span><strong>Live statistics</strong> — live numbers refreshed every 200 ms (captured, sent, packets per second), a packets-per-second graph, and delay percentiles (p50/p95/p99). The percentiles only fill in while Lag or Jitter is actually doing work.</span></li>
+      <li><b>3</b><span><strong>Modules</strong> — checkboxes for the 12 effects. The moment you tick one, its parameter form opens automatically, and a per-second activity sparkline appears next to it.</span></li>
+      <li><b>4</b><span><strong>Profiles · scenario · capture file</strong> — save the current settings under a name and re-apply them, play a scenario file, and dump or replay pcap captures.</span></li>
+      <li><b>5</b><span><strong>Scenario editor</strong> — assemble steps like "after N seconds, change to this value" on screen and run them right away. No need to write a file by hand.</span></li>
+    </ul>
+
+    <div class="callout callout-info">
+      <span class="ico">🎨</span>
+      <p>The <strong>Theme</strong> button on the right of the header cycles <code>Auto → Light → Dark → Auto</code>.
+      Your choice is saved in the browser and kept the next time you open it — the <strong>🌓 Auto</strong> button at the top right of this guide works the same way.</p>
+    </div>
+  </div>
+</section>
+
+<section id="filter">
+  <div class="container">
+    <span class="section-kicker">Filters</span>
+    <h2>Choosing "which packets to mess with"</h2>
+    <p class="section-desc">A filter is the <strong>condition for the packets clumsy intercepts</strong>. Packets that don't match go through as usual;
+      only matching packets are subjected to the effects you switch on below (delay, loss and so on). clumsy uses the filter syntax of WinDivert, the Windows network driver, as-is.</p>
+
+    <h3>Common filters</h3>
+    <div class="filter-grid">
+      <div class="filter-chip"><code>udp</code><span>UDP traffic only (most online games)</span></div>
+      <div class="filter-chip"><code>tcp</code><span>TCP traffic only (the web, most app-server traffic)</span></div>
+      <div class="filter-chip"><code>outbound</code><span>Only packets you send</span></div>
+      <div class="filter-chip"><code>inbound</code><span>Only packets you receive</span></div>
+      <div class="filter-chip"><code>udp and (udp.DstPort == 7777 or udp.SrcPort == 7777)</code><span>Only UDP on port 7777 (pin it to a game server port)</span></div>
+      <div class="filter-chip"><code>udp and outbound and loopback</code><span>For testing a server and client running on the same PC</span></div>
+    </div>
+
+    <div class="callout callout-warn">
+      <span class="ico">⚠️</span>
+      <p><strong>Careful when testing localhost (loopback)</strong> — when the server and client run together on the same PC, you must
+      include the <code>outbound</code> condition. The combination <code>inbound and loopback</code> does not work. Pick
+      <code>localhost ipv4 udp</code> from the dashboard Presets and the correct form (<code>udp and outbound and loopback</code>) is filled in for you.</p>
+    </div>
+
+    <h3 style="margin-top:30px;">You don't need to know the filter syntax</h3>
+    <p style="margin-top:-4px;">Open the dashboard's <strong>Filter builder</strong> and just pick the protocol (TCP/UDP/ICMP), direction (send/receive), port, remote IP and loopback
+      from dropdowns; the filter text is generated for you. Save the result under a name with <strong>Save as preset</strong>
+      and next time you can pick it straight from the dropdown.</p>
+
+    <h3 style="margin-top:30px;">Narrowing it down to one process</h3>
+    <p style="margin-top:-4px;">Put an executable name (e.g. <code>game.exe</code>) in the <strong>Process</strong> box and clumsy finds the ports that program uses and adds them to the filter.
+      These ports are looked up only once, <strong>at the moment you press Start</strong>, so the recommended order is: launch the game, connect to the server, and then Start clumsy.</p>
+    <div class="code-block">
+      <button class="copy-btn" type="button">Copy</button>
+      <pre>clumsy.exe --filter "udp" --process game.exe --lag on --lag-time 100</pre>
+    </div>
+  </div>
+</section>
+
+<section id="modules">
+  <div class="container">
+    <span class="section-kicker">Effects (modules)</span>
+    <h2>12 effects — switch on only what you need</h2>
+    <p class="section-desc">Each effect is an independent on/off switch. You can turn on several at once, and every one of them can be applied to <strong>Inbound (receive)</strong> and
+      <strong>Outbound (send)</strong> separately. The animations below show the <em>feel</em> of each effect, not real timing — see the tables for exact values.</p>
+
+    <div class="cat-bar">
+      <button class="cat-btn active" data-cat="all" type="button">All 12</button>
+      <button class="cat-btn" data-cat="delay" type="button">🐢 Delay</button>
+      <button class="cat-btn" data-cat="loss" type="button">💥 Loss · outages</button>
+      <button class="cat-btn" data-cat="mutate" type="button">🧬 Mutation</button>
+      <button class="cat-btn" data-cat="conn" type="button">🔌 Connection · speed</button>
+    </div>
+
+    <div class="mod-grid">
+
+      <article class="mod-card" data-cat="delay" id="mod-lag">
+        <div class="demo demo-lag">
+          <div class="node pc">🖥️</div><div class="node srv">🌐</div><div class="lane"></div>
+          <span class="packet p1"></span><span class="packet p2"></span><span class="packet p3"></span><span class="packet p4"></span>
+          <p class="demo-cap">Every packet arrives equally late</p>
+        </div>
+        <div class="mod-card__head"><span class="tag tag-delay">Delay</span><h3>Lag <span class="mod-card__kr">fixed delay</span></h3></div>
+        <p class="mod-card__desc">Holds every packet for <strong>a set time (ms)</strong> before sending it. Since the delay is always the same, it produces a "steady ping".</p>
+        <table class="param-table">
+          <tr><th>Parameter</th><th>Meaning</th><th>Default</th><th>Range</th></tr>
+          <tr><td>lag-time</td><td>Delay</td><td>50ms</td><td>0–15000ms</td></tr>
+        </table>
+        <div class="mod-when"><b>Use it when</b> — you want to reproduce something that is "always equally far away", like an overseas server.</div>
+        <div class="code-block"><button class="copy-btn" type="button">Copy</button><pre>clumsy.exe --filter "udp and outbound" --lag on --lag-time 150</pre></div>
+      </article>
+
+      <article class="mod-card" data-cat="delay" id="mod-jitter">
+        <div class="demo demo-jitter">
+          <div class="node pc">🖥️</div><div class="node srv">🌐</div><div class="lane"></div>
+          <span class="packet p1"></span><span class="packet p2"></span><span class="packet p3"></span><span class="packet p4"></span>
+          <p class="demo-cap">Packets arrive unevenly, each at its own pace</p>
+        </div>
+        <div class="mod-card__head"><span class="tag tag-delay">Delay</span><h3>Jitter <span class="mod-card__kr">variable delay</span></h3></div>
+        <p class="mod-card__desc">Gives each packet <strong>a random delay between Min and Max</strong>. Because every packet is delayed by a different amount, arrival order can get shuffled naturally.</p>
+        <table class="param-table">
+          <tr><th>Parameter</th><th>Meaning</th><th>Default</th><th>Range</th></tr>
+          <tr><td>jitter-min</td><td>Minimum delay</td><td>20ms</td><td>0–5000ms</td></tr>
+          <tr><td>jitter-max</td><td>Maximum delay</td><td>100ms</td><td>0–5000ms</td></tr>
+          <tr><td>jitter-dist</td><td>Distribution shape</td><td>uniform</td><td>uniform / normal / pareto</td></tr>
+        </table>
+        <div class="mod-when"><b>Use it when</b> — you need irregular latency like the real internet, or want to test lag compensation. <code>pareto</code> reproduces a congested network that "occasionally spikes hard".</div>
+        <div class="code-block"><button class="copy-btn" type="button">Copy</button><pre>clumsy.exe --filter "udp and outbound" --jitter on --jitter-min 30 --jitter-max 200</pre></div>
+      </article>
+
+      <article class="mod-card" data-cat="loss" id="mod-drop">
+        <div class="demo demo-drop">
+          <div class="node pc">🖥️</div><div class="node srv">🌐</div><div class="lane"></div>
+          <span class="packet p1"></span><span class="packet p2"></span><span class="packet p3"></span><span class="packet p4"></span>
+          <p class="demo-cap">Packets vanish at a set probability</p>
+        </div>
+        <div class="mod-card__head"><span class="tag tag-loss">Loss</span><h3>Drop <span class="mod-card__kr">packet drop</span></h3></div>
+        <p class="mod-card__desc">Simply throws each packet away with <strong>an independent probability</strong> (like a coin toss). Losses are spread out evenly.</p>
+        <table class="param-table">
+          <tr><th>Parameter</th><th>Meaning</th><th>Default</th><th>Range</th></tr>
+          <tr><td>drop-chance</td><td>Drop probability</td><td>10.0%</td><td>0–100%</td></tr>
+        </table>
+        <div class="mod-when"><b>Use it when</b> — verifying retransmission and loss-recovery logic. Unlike Burst Loss below, losses don't cluster; they are spread evenly.</div>
+        <div class="code-block"><button class="copy-btn" type="button">Copy</button><pre>clumsy.exe --filter "udp and outbound" --drop on --drop-chance 5.0</pre></div>
+      </article>
+
+      <article class="mod-card" data-cat="loss" id="mod-burstloss">
+        <div class="demo demo-burst">
+          <div class="stream">
+            <span class="chip" style="animation-delay:0s"></span><span class="chip" style="animation-delay:.28s"></span>
+            <span class="chip" style="animation-delay:.56s"></span><span class="chip" style="animation-delay:.84s"></span>
+            <span class="chip" style="animation-delay:1.12s"></span><span class="chip" style="animation-delay:1.4s"></span>
+            <span class="chip" style="animation-delay:1.68s"></span><span class="chip" style="animation-delay:1.96s"></span>
+            <span class="chip" style="animation-delay:2.24s"></span><span class="chip" style="animation-delay:2.52s"></span>
+            <span class="chip" style="animation-delay:2.8s"></span><span class="chip" style="animation-delay:3.08s"></span>
+          </div>
+          <p class="demo-cap" style="bottom:4px;">Losses come in clusters (Good/Bad states)</p>
+        </div>
+        <div class="mod-card__head"><span class="tag tag-loss">Loss</span><h3>Burst Loss <span class="mod-card__kr">clustered loss</span></h3></div>
+        <p class="mod-card__desc">A <strong>model that switches between two states</strong>, Good (normal) and Bad (burst) — the Gilbert-Elliott model. Once it enters Bad, several packets in a row disappear — a more realistic picture of wireless links, where "losses come in bunches".</p>
+        <table class="param-table">
+          <tr><th>Parameter</th><th>Meaning</th><th>Default</th></tr>
+          <tr><td>burstloss-good</td><td>Drop probability in Good state</td><td>2.0%</td></tr>
+          <tr><td>burstloss-bad</td><td>Drop probability in Bad state</td><td>80.0%</td></tr>
+          <tr><td>burstloss-gb</td><td>Good→Bad transition probability</td><td>5.0%</td></tr>
+          <tr><td>burstloss-bg</td><td>Bad→Good transition probability</td><td>20.0%</td></tr>
+        </table>
+        <div class="mod-when"><b>Use it when</b> — the link drops out repeatedly for a short stretch, as with radio interference or entering a tunnel. Drop 10% and Burst Loss 10% may have the same total loss rate, but the app experiences them completely differently.</div>
+        <div class="code-block"><button class="copy-btn" type="button">Copy</button><pre>clumsy.exe --filter "udp and outbound" --burstloss on</pre></div>
+      </article>
+
+      <article class="mod-card" data-cat="loss" id="mod-blackout">
+        <div class="demo demo-blackout">
+          <div class="node pc">🖥️</div><div class="node srv">🌐</div><div class="lane"></div>
+          <span class="packet p1"></span><span class="packet p2"></span><span class="packet p3"></span><span class="packet p4"></span>
+          <div class="overlay"><span>🚫 Connection lost</span></div>
+          <p class="demo-cap">Cuts everything off periodically, then recovers</p>
+        </div>
+        <div class="mod-card__head"><span class="tag tag-loss">Loss</span><h3>Blackout <span class="mod-card__kr">outage</span></h3></div>
+        <p class="mod-card__desc">After a normal period (Gap), it <strong>blocks every packet completely</strong> for a set time (Duration). This cycle repeats over and over.</p>
+        <table class="param-table">
+          <tr><th>Parameter</th><th>Meaning</th><th>Default</th><th>Range</th></tr>
+          <tr><td>blackout-duration</td><td>How long each outage lasts</td><td>3000ms</td><td>100–60000ms</td></tr>
+          <tr><td>blackout-gap</td><td>Normal time between outages</td><td>15000ms</td><td>1000–300000ms</td></tr>
+          <tr><td>blackout-trigger</td><td>Trigger now (button)</td><td>—</td><td>Click to start/cancel an outage immediately</td></tr>
+        </table>
+        <div class="mod-when"><b>Use it when</b> — testing client reconnect logic, timeout handling and session recovery code. It drops immediately with no buffering, which is what sets it apart from Throttle below.</div>
+        <div class="code-block"><button class="copy-btn" type="button">Copy</button><pre>clumsy.exe --filter "udp and outbound" --blackout on --blackout-duration 3000 --blackout-gap 20000</pre></div>
+      </article>
+
+      <article class="mod-card" data-cat="loss" id="mod-throttle">
+        <div class="demo demo-throttle">
+          <div class="node pc">🖥️</div><div class="node srv">🌐</div><div class="lane"></div>
+          <span class="packet p1"></span><span class="packet p2"></span><span class="packet p3"></span><span class="packet p4"></span>
+          <p class="demo-cap">Holds packets briefly, then sends them all in one burst</p>
+        </div>
+        <div class="mod-card__head"><span class="tag tag-loss">Loss</span><h3>Throttle <span class="mod-card__kr">temporary hold</span></h3></div>
+        <p class="mod-card__desc">Randomly pauses sending for a moment and piles packets up in a buffer. When the time is up it <strong>sends them all at once</strong> (a burst) or, depending on the setting, <strong>throws them all away.</strong></p>
+        <table class="param-table">
+          <tr><th>Parameter</th><th>Meaning</th><th>Default</th><th>Range</th></tr>
+          <tr><td>throttle-chance</td><td>Probability of starting a hold</td><td>10.0%</td><td>0–100%</td></tr>
+          <tr><td>throttle-frame</td><td>How long a hold lasts</td><td>30ms</td><td>0–1000ms</td></tr>
+          <tr><td>throttle-drop</td><td>Discard held packets?</td><td>OFF (send in a burst)</td><td>ON discards them</td></tr>
+        </table>
+        <div class="mod-when"><b>Use it when</b> — reproducing network gear that briefly floods or stalls traffic.</div>
+        <div class="code-block"><button class="copy-btn" type="button">Copy</button><pre>clumsy.exe --filter "udp and outbound" --throttle on --throttle-chance 10.0 --throttle-frame 50</pre></div>
+      </article>
+
+      <article class="mod-card" data-cat="mutate" id="mod-duplicate">
+        <div class="demo demo-dup">
+          <div class="node pc">🖥️</div><div class="node srv">🌐</div><div class="lane"></div>
+          <span class="packet p1"></span><span class="packet p1c"></span>
+          <span class="packet p2"></span><span class="packet p2c"></span>
+          <p class="demo-cap">A packet is copied on the way and arrives twice</p>
+        </div>
+        <div class="mod-card__head"><span class="tag tag-mutate">Mutation</span><h3>Duplicate <span class="mod-card__kr">packet copies</span></h3></div>
+        <p class="mod-card__desc">Packets hit by the probability are <strong>copied and sent back to back</strong> the given number of times. The same content arrives several times.</p>
+        <table class="param-table">
+          <tr><th>Parameter</th><th>Meaning</th><th>Default</th><th>Range</th></tr>
+          <tr><td>duplicate-chance</td><td>Probability of duplicating</td><td>10.0%</td><td>0–100%</td></tr>
+          <tr><td>duplicate-count</td><td>Number of copies (including the original)</td><td>2</td><td>2–50</td></tr>
+        </table>
+        <div class="mod-when"><b>Use it when</b> — verifying that server and client correctly ignore duplicates when the same packet arrives twice, especially in UDP games.</div>
+        <div class="code-block"><button class="copy-btn" type="button">Copy</button><pre>clumsy.exe --filter "udp and outbound" --duplicate on --duplicate-count 2 --duplicate-chance 20.0</pre></div>
+      </article>
+
+      <article class="mod-card" data-cat="mutate" id="mod-ood">
+        <div class="demo demo-ood">
+          <div class="node pc">🖥️</div><div class="node srv">🌐</div><div class="lane"></div>
+          <span class="packet p1">1</span><span class="packet p2">2</span><span class="packet p3">3</span>
+          <p class="demo-cap">Packets arrive in a different order than they were sent</p>
+        </div>
+        <div class="mod-card__head"><span class="tag tag-mutate">Mutation</span><h3>Out of Order <span class="mod-card__kr">reordering</span></h3></div>
+        <p class="mod-card__desc">Collects packets in an internal buffer for a moment, and when the buffer is full or the oldest packet has waited past the limit, <strong>releases them all at once in random order</strong>.</p>
+        <table class="param-table">
+          <tr><th>Parameter</th><th>Meaning</th><th>Default</th><th>Range</th></tr>
+          <tr><td>ood-chance</td><td>Probability of catching a packet in the buffer</td><td>10.0%</td><td>0–100%</td></tr>
+          <tr><td>ood-buffer</td><td>Maximum packets held</td><td>5</td><td>2–50</td></tr>
+          <tr><td>ood-delay</td><td>Maximum hold time</td><td>200ms</td><td>10–2000ms</td></tr>
+        </table>
+        <div class="mod-when"><b>Use it when</b> — verifying UDP sequence-number handling and packet reassembly logic. The difference: Jitter shuffles naturally, while Out of Order deliberately collects and shuffles.</div>
+        <div class="code-block"><button class="copy-btn" type="button">Copy</button><pre>clumsy.exe --filter "udp and outbound" --ood on --ood-chance 15.0 --ood-buffer 8 --ood-delay 300</pre></div>
+      </article>
+
+      <article class="mod-card" data-cat="mutate" id="mod-tamper">
+        <div class="demo demo-tamper">
+          <div class="node pc">🖥️</div><div class="node srv">🌐</div><div class="lane"></div>
+          <span class="packet p1"></span><span class="packet p2"></span><span class="packet p3"></span>
+          <p class="demo-cap">Content gets damaged on the way and arrives that way</p>
+        </div>
+        <div class="mod-card__head"><span class="tag tag-mutate">Mutation</span><h3>Tamper <span class="mod-card__kr">payload tampering</span></h3></div>
+        <p class="mod-card__desc"><strong>Deliberately overwrites</strong> a quarter of the payload (the data part) with an XOR pattern. You can choose where it strikes.</p>
+        <table class="param-table">
+          <tr><th>Parameter</th><th>Meaning</th><th>Default</th><th>Range</th></tr>
+          <tr><td>tamper-chance</td><td>Tamper probability</td><td>10.0%</td><td>0–100%</td></tr>
+          <tr><td>tamper-position</td><td>Where to tamper</td><td>1 (Center)</td><td>0=Front 1=Center 2=Back 3=Random</td></tr>
+          <tr><td>tamper-checksum</td><td>Recompute checksum after tampering</td><td>ON</td><td>—</td></tr>
+        </table>
+        <div class="mod-when"><b>Use it when</b> — verifying that the server handles errors properly when a game packet's header or sequence number is damaged. With <code>Redo checksum</code> off, the OS may simply drop the packet, so leave it on if you want the damaged data to reach the application.</div>
+        <div class="code-block"><button class="copy-btn" type="button">Copy</button><pre>clumsy.exe --filter "udp and outbound" --tamper on --tamper-chance 5.0 --tamper-position 0</pre></div>
+      </article>
+
+      <article class="mod-card" data-cat="mutate" id="mod-corrupt">
+        <div class="demo demo-corrupt">
+          <div class="node pc">🖥️</div><div class="node srv">🌐</div><div class="lane"></div>
+          <span class="packet p1"></span><span class="packet p2"></span><span class="packet p3"></span>
+          <p class="demo-cap">Bits flip sporadically along the way</p>
+        </div>
+        <div class="mod-card__head"><span class="tag tag-mutate">Mutation</span><h3>Corrupt <span class="mod-card__kr">bit errors</span></h3></div>
+        <p class="mod-card__desc"><strong>Flips each bit</strong> of the payload <strong>independently</strong> with a very small probability. If Tamper is "deliberate manipulation", Corrupt is closer to the sporadic noise that really happens on Wi-Fi and cellular links.</p>
+        <table class="param-table">
+          <tr><th>Parameter</th><th>Meaning</th><th>Default</th><th>Range</th></tr>
+          <tr><td>corrupt-chance</td><td>Probability of damaging a packet</td><td>10%</td><td>0–100%</td></tr>
+          <tr><td>corrupt-ber</td><td>Per-bit flip probability (ppm)</td><td>100</td><td>0–1,000,000</td></tr>
+          <tr><td>corrupt-checksum</td><td>Recompute checksum after damage</td><td>ON</td><td>—</td></tr>
+        </table>
+        <div class="mod-when"><b>Use it when</b> — checking what the app does when it meets partly damaged data on a wireless link. 100 ppm is roughly one flipped bit every 1250 bytes.</div>
+        <div class="code-block"><button class="copy-btn" type="button">Copy</button><pre>clumsy.exe --filter "udp and outbound" --corrupt on --corrupt-chance 50 --corrupt-ber 5000</pre></div>
+      </article>
+
+      <article class="mod-card" data-cat="conn" id="mod-reset">
+        <div class="demo demo-reset">
+          <div class="node pc">🖥️</div><div class="node srv">🌐</div><div class="lane"></div>
+          <div class="rst-badge">RST ⚡</div>
+          <p class="demo-cap">Tears the TCP connection down by force</p>
+        </div>
+        <div class="mod-card__head"><span class="tag tag-conn">Connection</span><h3>Set TCP RST <span class="mod-card__kr">forced reset</span></h3></div>
+        <p class="mod-card__desc">Sets the <strong>RST flag</strong> on TCP packets so the connection is torn down immediately. The receiving side treats it as an abnormal close. It has no effect on UDP. The default probability is <strong>0%</strong>, so just switching it on does nothing — raise <code>reset-chance</code> or press the <code>RST next packet</code> button.</p>
+        <table class="param-table">
+          <tr><th>Parameter</th><th>Meaning</th><th>Default</th><th>Range</th></tr>
+          <tr><td>reset-chance</td><td>RST injection probability</td><td>0%</td><td>0–100%</td></tr>
+          <tr><td>reset-next</td><td>RST the very next packet (button)</td><td>—</td><td>Fires once per click</td></tr>
+        </table>
+        <div class="mod-when"><b>Use it when</b> — you want to test the client's reconnect handling at exactly the moment you choose, as if the TCP server process had suddenly died: use the <code>RST next packet</code> button.</div>
+        <div class="code-block"><button class="copy-btn" type="button">Copy</button><pre>clumsy.exe --filter "tcp and (tcp.DstPort==9000 or tcp.SrcPort==9000)" --reset on --reset-chance 5.0</pre></div>
+      </article>
+
+      <article class="mod-card" data-cat="conn" id="mod-bandwidth">
+        <div class="demo demo-bw">
+          <div class="node pc">🖥️</div><div class="node srv">🌐</div><div class="lane"></div>
+          <div class="gate"></div>
+          <span class="packet p1"></span><span class="packet p2"></span><span class="packet p3"></span><span class="packet p4"></span>
+          <p class="demo-cap">Slows down as it squeezes through a narrow section</p>
+        </div>
+        <div class="mod-card__head"><span class="tag tag-conn">Connection</span><h3>Bandwidth <span class="mod-card__kr">bandwidth cap</span></h3></div>
+        <p class="mod-card__desc">Limits throughput (KB/s). Packets over the limit are not dropped but <strong>queued and sent later, in order</strong>. Once the queue passes 2,000 packets it starts dropping, and <code>0</code> holds every packet, which effectively blocks traffic.</p>
+        <table class="param-table">
+          <tr><th>Parameter</th><th>Meaning</th><th>Default</th><th>Range</th></tr>
+          <tr><td>bandwidth-bandwidth</td><td>Bandwidth limit</td><td>10 KB/s</td><td>0–99999 KB/s</td></tr>
+        </table>
+        <div class="mod-when"><b>Use it when</b> — reproducing slow mobile links or congested networks. It keeps the packets and only lowers the speed, so it suits TCP flow-control and retransmission tests better than Drop.</div>
+        <div class="callout callout-warn" style="margin:0 0 10px; padding:9px 12px; font-size:12px;">
+          <span class="ico" style="font-size:14px;">⚠️</span>
+          <p>The token bucket <strong>starts full, at 64 KB or limit × 2 seconds, whichever is larger</strong>. So in a short test it can look as if "the limit isn't kicking in" at first — that is normal.</p>
+        </div>
+        <div class="code-block"><button class="copy-btn" type="button">Copy</button><pre>clumsy.exe --filter "udp and outbound" --bandwidth on --bandwidth-bandwidth 500</pre></div>
+      </article>
+
+    </div>
+  </div>
+</section>
+
+<section id="scenarios">
+  <div class="container">
+    <span class="section-kicker">Usage scenarios</span>
+    <h2>How people actually use it</h2>
+    <p class="section-desc">Click an item below to expand it. Each scenario is laid out as <strong>situation → settings → what to check → CLI command</strong>,
+      so you can simply follow along.</p>
+
+    <details class="scenario" open>
+      <summary><span class="ico">🎮</span> Reproduce ping to an overseas game server <span class="chev">▸</span><span class="sit">Lag</span></summary>
+      <div class="scenario-body">
+        <p class="sit"><strong>Situation</strong> — the game server is overseas and always adds 150 ms of delay; you want to reproduce that ahead of time.</p>
+        <table class="tone-table"><tr><th>Filter</th><th>Lag</th></tr><tr><td><code>udp and outbound</code></td><td>ON, Delay = 150ms</td></tr></table>
+        <p><strong>What to check</strong> — launch the game and see whether the in-game ping display stays pinned around 150 ms.</p>
+        <div class="code-block"><button class="copy-btn" type="button">Copy</button><pre>clumsy.exe --filter "udp and outbound" --lag on --lag-time 150</pre></div>
+      </div>
+    </details>
+
+    <details class="scenario">
+      <summary><span class="ico">📶</span> Reproduce unstable Wi-Fi <span class="chev">▸</span><span class="sit">Jitter + Drop</span></summary>
+      <div class="scenario-body">
+        <p class="sit"><strong>Situation</strong> — like Wi-Fi with a weak signal: latency jumps around and a packet goes missing now and then.</p>
+        <table class="tone-table"><tr><th>Filter</th><th>Jitter</th><th>Drop</th></tr>
+          <tr><td><code>udp and outbound</code></td><td>ON, Min=30ms Max=200ms</td><td>ON, Chance=3.0%</td></tr></table>
+        <p><strong>What to check</strong> — with irregular response times and about 3 in every 100 packets lost, does the app hold up gracefully?</p>
+        <div class="code-block"><button class="copy-btn" type="button">Copy</button><pre>clumsy.exe --filter "udp and outbound" --jitter on --jitter-min 30 --jitter-max 200 --drop on --drop-chance 3.0</pre></div>
+      </div>
+    </details>
+
+    <details class="scenario">
+      <summary><span class="ico">📱</span> Reproduce mobile 4G / 3G <span class="chev">▸</span><span class="sit">Lag+Jitter+Drop+Bandwidth</span></summary>
+      <div class="scenario-body">
+        <p class="sit"><strong>Situation</strong> — simulate a user on a smartphone, on 4G or on 3G in the subway.</p>
+        <table class="tone-table"><tr><th>Network</th><th>Lag</th><th>Jitter</th><th>Drop</th><th>Bandwidth</th></tr>
+          <tr><td>4G (good)</td><td>60ms</td><td>10–80ms</td><td>2.0%</td><td>5000 KB/s</td></tr>
+          <tr><td>3G (poor)</td><td>150ms</td><td>50–300ms</td><td>8.0%</td><td>500 KB/s</td></tr></table>
+        <p><strong>What to check</strong> — do the loading spinner, retry UI and timeout messages show up appropriately at each level?</p>
+        <div class="code-block"><button class="copy-btn" type="button">Copy</button><pre>clumsy.exe --filter "udp and outbound" --lag on --lag-time 150 --jitter on --jitter-min 50 --jitter-max 300 --drop on --drop-chance 8.0 --bandwidth on --bandwidth-bandwidth 500</pre></div>
+      </div>
+    </details>
+
+    <details class="scenario">
+      <summary><span class="ico">🛰️</span> Reproduce satellite links / extreme latency <span class="chev">▸</span><span class="sit">Lag+Jitter+Drop</span></summary>
+      <div class="scenario-body">
+        <p class="sit"><strong>Situation</strong> — like satellite internet: extremely high latency that is itself fairly steady.</p>
+        <table class="tone-table"><tr><th>Filter</th><th>Lag</th><th>Jitter</th><th>Drop</th></tr>
+          <tr><td><code>udp and outbound</code></td><td>ON, 500ms</td><td>ON, 20–80ms</td><td>ON, 1.0%</td></tr></table>
+        <p><strong>What to check</strong> — at 500 ms+ RTT, real-time interaction becomes practically impossible. Watch how timeouts and disconnects are handled.</p>
+        <div class="code-block"><button class="copy-btn" type="button">Copy</button><pre>clumsy.exe --filter "udp and outbound" --lag on --lag-time 500 --jitter on --jitter-min 20 --jitter-max 80 --drop on --drop-chance 1.0</pre></div>
+      </div>
+    </details>
+
+    <details class="scenario">
+      <summary><span class="ico">🚇</span> Reproduce radio interference / entering a tunnel <span class="chev">▸</span><span class="sit">Burst Loss</span></summary>
+      <div class="scenario-body">
+        <p class="sit"><strong>Situation</strong> — packets disappear back to back for a short stretch, like in a subway tunnel. Drop alone spreads the losses out and doesn't give you this feel.</p>
+        <table class="tone-table"><tr><th>Goal</th><th>Good(%)</th><th>Bad(%)</th><th>G→B(%)</th><th>B→G(%)</th></tr>
+          <tr><td>Short, frequent bursts</td><td>1.0</td><td>70.0</td><td>10.0</td><td>40.0</td></tr>
+          <tr><td>Long, rare bursts</td><td>0.5</td><td>90.0</td><td>2.0</td><td>10.0</td></tr></table>
+        <p><strong>What to check</strong> — even at the same overall loss rate, Drop and Burst Loss feel different. Watch for "momentary freezes" caused by several inputs lost in a row.</p>
+        <div class="code-block"><button class="copy-btn" type="button">Copy</button><pre>clumsy.exe --filter "udp and outbound" --burstloss on --burstloss-good 1.0 --burstloss-bad 70.0 --burstloss-gb 10.0 --burstloss-bg 40.0</pre></div>
+      </div>
+    </details>
+
+    <details class="scenario">
+      <summary><span class="ico">🔌</span> Test reconnect logic <span class="chev">▸</span><span class="sit">Blackout / TCP RST</span></summary>
+      <div class="scenario-body">
+        <p class="sit"><strong>Situation</strong> — you want to confirm that the client's reconnect code works correctly.</p>
+        <p><strong>Option A — Blackout (recommended)</strong>: cuts the connection completely for 3 seconds every 20 seconds. Watch the sequence: outage detected → reconnect attempt → session restored.</p>
+        <div class="code-block"><button class="copy-btn" type="button">Copy</button><pre>clumsy.exe --filter "udp and outbound" --blackout on --blackout-duration 3000 --blackout-gap 20000</pre></div>
+        <p><strong>Option B — TCP RST</strong>: for a TCP server, press the dashboard's <code>RST next packet</code> button whenever you like to tear the connection down instantly.</p>
+        <table class="tone-table"><tr><th></th><th>Blackout</th><th>TCP RST</th></tr>
+          <tr><td>Protocol</td><td>Both UDP and TCP</td><td>TCP only</td></tr>
+          <tr><td>How</td><td>Silent drop (provokes a timeout)</td><td>RST signals an immediate close</td></tr>
+          <tr><td>Repeats</td><td>Automatically</td><td>One manual click each time</td></tr></table>
+      </div>
+    </details>
+
+    <details class="scenario">
+      <summary><span class="ico">🏠</span> Local development (localhost) testing <span class="chev">▸</span><span class="sit">Lag + Drop</span></summary>
+      <div class="scenario-body">
+        <p class="sit"><strong>Situation</strong> — you run the client and server together on the same PC and want to test network conditions.</p>
+        <table class="tone-table"><tr><th>Filter</th><th>Lag</th><th>Drop</th></tr>
+          <tr><td><code>udp and outbound and loopback</code></td><td>ON, 80ms</td><td>ON, 2.0%</td></tr></table>
+        <p><strong>What to check</strong> — pick <code>localhost ipv4 udp</code> in the Presets dropdown and the correct filter is filled in for you. Remember once more: <code>inbound and loopback</code> does not work.</p>
+      </div>
+    </details>
+
+    <details class="scenario">
+      <summary><span class="ico">🤖</span> CI/CD automated testing <span class="chev">▸</span><span class="sit">Scenario file</span></summary>
+      <div class="scenario-body">
+        <p class="sit"><strong>Situation</strong> — you want your build pipeline to run automated tests while stepping through different network conditions.</p>
+        <p>The simplest way is to define the whole flow in a single <strong>scenario file</strong>: an array that says "at second N, change to these values".</p>
+        <div class="code-block"><button class="copy-btn" type="button">Copy</button><pre>[
+  { "at": 0,  "lag": true, "lag-time": 20 },
+  { "at": 30, "lag-time": 200, "jitter": true, "jitter-min": 50, "jitter-max": 300,
+              "drop": true, "drop-chance": 5.0 },
+  { "at": 60, "lag-time": 500, "drop-chance": 15.0 }
+]</pre></div>
+        <div class="code-block"><button class="copy-btn" type="button">Copy</button><pre>clumsy.exe --filter "udp and outbound" --scenario ci_scenario.json --timeout 90</pre></div>
+        <p><strong>What to check</strong> — keep just the scenario file under version control and anyone on the QA team can reproduce the exact same conditions. Switching conditions live over the REST API or the Named Pipe is covered in the <a href="#api">Automation section</a>.</p>
+      </div>
+    </details>
+
+    <details class="scenario">
+      <summary><span class="ico">🧪</span> Packet tampering / fuzz testing <span class="chev">▸</span><span class="sit">Tamper</span></summary>
+      <div class="scenario-body">
+        <p class="sit"><strong>Situation</strong> — you want to confirm that the server handles errors correctly when a game packet's header or sequence number is damaged.</p>
+        <table class="tone-table"><tr><th>Goal</th><th>Position</th><th>Chance</th></tr>
+          <tr><td>Damage sequence numbers (hit the header)</td><td>0 (Front)</td><td>5.0%</td></tr>
+          <tr><td>Unpredictable damage (fuzzing)</td><td>3 (Random)</td><td>10.0%</td></tr></table>
+        <p><strong>What to check</strong> — most game UDP packets keep their header at the front, so damaging the Front position lets you verify how the server handles a wrong packet type or sequence number. Random is closer to fuzzing: hunting for unexpected parse errors and crashes.</p>
+        <div class="code-block"><button class="copy-btn" type="button">Copy</button><pre>clumsy.exe --filter "udp and outbound" --tamper on --tamper-chance 5.0 --tamper-position 0 --tamper-checksum on</pre></div>
+      </div>
+    </details>
+
+    <details class="scenario">
+      <summary><span class="ico">🔁</span> Test UDP duplicate handling <span class="chev">▸</span><span class="sit">Duplicate</span></summary>
+      <div class="scenario-body">
+        <p class="sit"><strong>Situation</strong> — when network gear retransmits and the same packet arrives twice, you want to confirm that the server correctly ignores the duplicate.</p>
+        <table class="tone-table"><tr><th>Filter</th><th>Duplicate</th></tr><tr><td><code>udp and outbound</code></td><td>ON, Count=2, Chance=20.0%</td></tr></table>
+        <p><strong>What to check</strong> — one in five packets is sent together with a copy. Check the server logs to see that it processes each duplicate only once (by sequence number or similar).</p>
+        <div class="code-block"><button class="copy-btn" type="button">Copy</button><pre>clumsy.exe --filter "udp and outbound" --duplicate on --duplicate-count 2 --duplicate-chance 20.0</pre></div>
+      </div>
+    </details>
+
+    <h3 style="margin-top:36px;">Quick reference — settings by network type</h3>
+    <p style="margin-top:-4px; font-size:13.8px; color:var(--text-dim);">No single value here is "the right answer". Use the table as a starting point and adjust a little at a time to fit your situation.</p>
+    <div class="ref-wrap">
+      <table class="ref-table">
+        <tr><th>Network</th><th>Lag</th><th>Jitter</th><th>Drop</th><th>Bandwidth</th><th>Blackout</th></tr>
+        <tr><td>Home fiber</td><td>5ms</td><td>2–15ms</td><td>0.1%</td><td>—</td><td>—</td></tr>
+        <tr><td>Mobile 4G</td><td>60ms</td><td>10–80ms</td><td>2%</td><td>5000 KB/s</td><td>—</td></tr>
+        <tr><td>Mobile 3G</td><td>150ms</td><td>50–300ms</td><td>8%</td><td>500 KB/s</td><td>Dur=2s Gap=60s</td></tr>
+        <tr><td>Crowded public Wi-Fi</td><td>80ms</td><td>30–200ms</td><td>3%</td><td>2000 KB/s</td><td>—</td></tr>
+        <tr><td>Subway / dead zones</td><td>100ms</td><td>20–150ms</td><td>5%</td><td>—</td><td>Dur=3s Gap=20s</td></tr>
+        <tr><td>Satellite</td><td>500ms</td><td>20–80ms</td><td>1%</td><td>—</td><td>—</td></tr>
+        <tr><td>Overseas server (US)</td><td>150ms</td><td>10–40ms</td><td>0.5%</td><td>—</td><td>—</td></tr>
+        <tr><td>Overseas server (Europe)</td><td>200ms</td><td>10–50ms</td><td>0.5%</td><td>—</td><td>—</td></tr>
+        <tr><td>Extreme stress</td><td>300ms</td><td>100–500ms</td><td>15%</td><td>200 KB/s</td><td>Dur=5s Gap=10s</td></tr>
+      </table>
+    </div>
+  </div>
+</section>
+
+<section id="cli">
+  <div class="container">
+    <span class="section-kicker">CLI</span>
+    <h2>Switching things on and off from the command line</h2>
+    <p class="section-desc">The basic form is <code>clumsy.exe --filter "expression" --module on --module-param value ...</code>.
+      It behaves exactly the same as switching things on in the dashboard, and <code>clumsy.exe --help</code> shows the full list at any time.
+      The tables below pick out the most-used options — for per-module parameters, see the tables in the <a href="#modules">Effects section</a>.</p>
+
+    <div class="opt-group">
+      <h4>Global options</h4>
+      <table class="opt-table">
+        <tr><th>Option</th><th>Meaning</th></tr>
+        <tr><td>--filter "expr"</td><td>WinDivert filter. When given, capturing starts as soon as clumsy launches.</td></tr>
+        <tr><td>--process &lt;name&gt;</td><td>Only filter the traffic of one process (e.g. game.exe).</td></tr>
+        <tr><td>--timeout &lt;sec&gt;</td><td>Quit automatically after the given time. Handy in test scripts.</td></tr>
+        <tr><td>--profile &lt;name&gt;</td><td>Load and apply a profile saved in profiles.json.</td></tr>
+        <tr><td>--scenario &lt;file&gt;</td><td>Load a scenario JSON file and play it as capture starts.</td></tr>
+        <tr><td>--elevate on</td><td>If not running as Administrator, relaunch itself through UAC.</td></tr>
+        <tr><td>--verbose on/off</td><td>Per-packet detailed logging (for debugging; heavy performance cost).</td></tr>
+        <tr><td>--help</td><td>Print every option. It is generated from the code, down to each module parameter's range and default, so it is always up to date.</td></tr>
+        <tr><td>--version</td><td>Print the version.</td></tr>
+      </table>
+    </div>
+
+    <div class="callout callout-info">
+      <span class="ico">🧭</span>
+      <p><strong>Typos don't slip through silently.</strong> If there is an unknown option (<code>--lag-ms</code>, <code>--delay</code>) or an unusable value (letters where a number goes, a distribution name that doesn't exist),
+      clumsy <strong>starts nothing</strong>, tells you the correct name and exits. A number outside its range is pulled back into range, with a warning that shows the value actually applied.
+      Switches always take a value, as in <code>--lag on</code>, and <code>on/off</code> and <code>true/false</code> are case-insensitive.</p>
+    </div>
+
+    <div class="opt-group">
+      <h4>Exit codes</h4>
+      <table class="opt-table">
+        <tr><th>Code</th><th>Meaning</th></tr>
+        <tr><td>0</td><td>Clean exit (<code>--timeout</code> reached, Ctrl+C, <code>POST /api/quit</code>)</td></tr>
+        <tr><td>2</td><td>Command-line error: unknown option, unusable value, or a <code>--profile</code> / <code>--scenario</code> that could not be loaded. Nothing is started.</td></tr>
+        <tr><td>3</td><td><code>--filter</code> (capture) or <code>--replay-in</code> (pcap replay) was given but could not start (no Administrator rights, filter syntax error, missing file and so on). clumsy exits right away instead of waiting.</td></tr>
+        <tr><td>4</td><td>Another clumsy is already running. Only the newly launched one exits; the existing instance keeps running.</td></tr>
+      </table>
+    </div>
+
+    <div class="opt-group">
+      <h4>Common module pattern</h4>
+      <table class="opt-table">
+        <tr><th>Pattern</th><th>Meaning</th></tr>
+        <tr><td>--&lt;module&gt; on/off</td><td>Enable/disable a module. e.g. <code>--lag on</code></td></tr>
+        <tr><td>--&lt;module&gt;-&lt;param&gt; &lt;value&gt;</td><td>Set a parameter. e.g. <code>--lag-time 150</code>, <code>--drop-chance 5.0</code></td></tr>
+        <tr><td>--&lt;module&gt;-inbound / -outbound on/off</td><td>Shared by every module. Which direction to apply it to, receive and/or send (both ON by default)</td></tr>
+      </table>
+    </div>
+
+    <div class="opt-group">
+      <h4>Logging · statistics · automation helpers</h4>
+      <table class="opt-table">
+        <tr><th>Option</th><th>Meaning</th></tr>
+        <tr><td>--stats-log &lt;file&gt;</td><td>Write live statistics periodically to .csv or .json.</td></tr>
+        <tr><td>--stats-interval &lt;sec&gt;</td><td>Stats log interval (default 1 second).</td></tr>
+        <tr><td>--pcap-out &lt;file&gt;</td><td>Save packets in libpcap format (opens in Wireshark).</td></tr>
+        <tr><td>--report-out &lt;file&gt;</td><td>Write a human-friendly HTML session report on exit.</td></tr>
+        <tr><td>--web off</td><td>Disable the web dashboard (HTTP server) entirely for a fully headless run.</td></tr>
+        <tr><td>--web-port &lt;n&gt;</td><td>Dashboard port (default 8080).</td></tr>
+        <tr><td>--web-bind &lt;addr&gt;</td><td>Bind address (default 127.0.0.1). Any other address forces token authentication.</td></tr>
+      </table>
+    </div>
+
+    <h3 style="margin-top:8px;">Examples</h3>
+    <div class="code-block"><button class="copy-btn" type="button">Copy</button><pre># 100 ms delay + 3% drop on game-server UDP (port 7777)
+clumsy.exe --filter "udp and (udp.DstPort==7777 or udp.SrcPort==7777)" --lag on --lag-time 100 --drop on --drop-chance 3.0
+
+# Run for 30 seconds, then quit automatically
+clumsy.exe --filter "udp and outbound" --lag on --lag-time 200 --timeout 30
+
+# 60-second test that logs statistics to CSV
+clumsy.exe --filter "udp and outbound" --drop on --drop-chance 5.0 --stats-log result.csv --timeout 60
+
+# Fully headless run with no dashboard (for servers/containers)
+clumsy.exe --filter "udp and outbound" --drop on --drop-chance 5.0 --web off --timeout 30</pre></div>
+
+    <p style="font-size:13px; margin-top:6px;">Every option is listed in <code>clumsy.exe --help</code> and in the manual that ships with the project (<a href="../manual_en-1.md"><code>manual_en-1.md</code></a>).</p>
+  </div>
+</section>
+
+<section id="api">
+  <div class="container">
+    <span class="section-kicker">Automation</span>
+    <h2>Remote control with the REST API</h2>
+    <p class="section-desc">Everything the dashboard does when you click is, in the end, a REST API call. CI pipelines, automation scripts and other programs
+      can control clumsy in exactly the same way. With the default settings (listening on 127.0.0.1 only), <strong>no authentication is needed.</strong>
+      If you pass <code>--web-token</code>, or open it on an outside address with <code>--web-bind</code>, you need the <code>X-Clumsy-Token</code> header or <code>?token=</code>
+      (without <code>--web-token</code>, a random token is generated and appended to the dashboard address in the banner).</p>
+
+    <div class="ref-wrap">
+      <table class="api-table">
+        <tr><th>Endpoint</th><th>Meaning</th></tr>
+        <tr><td><span class="pill pill-get">GET</span>/api/docs</td><td>Description, example body and API rules for every endpoint (start here)</td></tr>
+        <tr><td><span class="pill pill-get">GET</span>/llms.txt</td><td>Usage guide for AI agents. The Korean version is <code>/llms_kr.txt</code></td></tr>
+        <tr><td><span class="pill pill-get">GET</span>/api/health</td><td>Liveness check (no auth needed, for CI health checks)</td></tr>
+        <tr><td><span class="pill pill-get">GET</span>/api/status</td><td>Capture state, filter, last message</td></tr>
+        <tr><td><span class="pill pill-get">GET</span>/api/modules</td><td>Full state of every module + parameters + form metadata</td></tr>
+        <tr><td><span class="pill pill-get">GET</span>/api/stats</td><td>Live statistics (captured/sent/buffers/latency percentiles)</td></tr>
+        <tr><td><span class="pill pill-get">GET</span>/api/stream</td><td>Server-Sent Events, pushes stats every 200 ms</td></tr>
+        <tr><td><span class="pill pill-get">GET</span>/metrics</td><td>Prometheus text exposition format (no auth needed)</td></tr>
+        <tr><td><span class="pill pill-post">POST</span>/api/filter</td><td>Set the filter and start capturing</td></tr>
+        <tr><td><span class="pill pill-post">POST</span>/api/stop</td><td>Stop capturing</td></tr>
+        <tr><td><span class="pill pill-post">POST</span>/api/modules/{name}</td><td>Enable a module / change its parameters</td></tr>
+        <tr><td><span class="pill pill-post">POST</span>/api/apply</td><td>Set several modules at once, without saving</td></tr>
+        <tr><td><span class="pill pill-post">POST</span>/api/scenario/loadinline</td><td>Load the step array in the body <code>{"scenario":[...]}</code> without a file</td></tr>
+        <tr><td><span class="pill pill-post">POST</span>/api/scenario/start</td><td>Replay the loaded scenario from the beginning (it also plays automatically whenever a capture starts)</td></tr>
+        <tr><td><span class="pill pill-post">POST</span>/api/quit</td><td>Stop capturing and shut clumsy down</td></tr>
+      </table>
+    </div>
+
+    <div class="callout callout-info">
+      <span class="ico">📬</span>
+      <p><strong>Read the whole response.</strong> Every response is JSON whose <code>"status"</code> is <code>"ok"</code> or <code>"error"</code>.
+      Even with <code>ok</code>, the request may not have gone through exactly as sent, and when that happens the response tells you —
+      <code>warnings</code> (values that were out of range and adjusted, or refused), <code>unknownKeys</code> (keys no module has), <code>params</code> (the values actually applied),
+      <code>capturing</code> (<code>false</code> means the setting is only stored and isn't acting on traffic yet).
+      If none of the requested keys could be applied, the reply is a <code>400</code> error, and an unknown path or wrong method also gets a JSON answer telling you what to use instead.</p>
+    </div>
+
+    <h3 style="margin-top:28px;">curl examples</h3>
+    <div class="code-block"><button class="copy-btn" type="button">Copy</button><pre># Start capturing
+curl -X POST http://127.0.0.1:8080/api/filter -H "Content-Type: application/json" -d "{\"filter\":\"udp and outbound\"}"
+
+# Turn lag on and set the delay to 200 ms
+curl -X POST http://127.0.0.1:8080/api/modules/lag -H "Content-Type: application/json" -d "{\"enabled\":true,\"lag-time\":200}"
+
+# Set several modules at once
+curl -X POST http://127.0.0.1:8080/api/apply -H "Content-Type: application/json" -d "{\"lag\":true,\"lag-time\":200,\"drop\":true,\"drop-chance\":5.0}"
+
+# Stop capturing, then check the statistics
+curl -X POST http://127.0.0.1:8080/api/stop
+curl http://127.0.0.1:8080/api/stats</pre></div>
+
+    <h3 style="margin-top:28px;">Subscribing to the live stream from Python</h3>
+    <div class="code-block"><button class="copy-btn" type="button">Copy</button><pre>import requests, json
+
+with requests.get("http://127.0.0.1:8080/api/stream", stream=True) as r:
+    for line in r.iter_lines(decode_unicode=True):
+        if line and line.startswith("data: "):
+            stats = json.loads(line[6:])
+            print(stats["captured"], stats["sent"])</pre></div>
+
+    <div class="callout callout-info">
+      <span class="ico">🔧</span>
+      <p>There is also a <strong>Named Pipe API</strong>. On Windows you exchange one JSON request for one JSON response over <code>\\.\pipe\clumsy</code>.
+      It shares exactly the same internal handling code (<code>controlapi.cpp</code>) as REST, so the two can never behave differently.
+      If you already have automation scripts built on the Named Pipe, they keep working without changes.</p>
+    </div>
+  </div>
+</section>
+
+<section id="llm">
+  <div class="container">
+    <span class="section-kicker">AI agents</span>
+    <h2>Describe it in plain words and an AI runs it for you</h2>
+    <p class="section-desc">clumsy is built to be driven not only by people but also by <strong>AI coding agents</strong> (Claude Code, Codex, Cursor, Copilot agents and so on).
+      Describe what you want — "150 ms of latency and 5% loss for 60 seconds" — and the agent turns it into commands or REST calls, runs the test, reads the statistics, and puts the network back to normal when it is done.
+      You don't need to memorize any option names.</p>
+
+    <h3>Just tell it these four things</h3>
+    <ol class="steps">
+      <li><b>Where clumsy is</b><p>The path to <code>clumsy.exe</code>. e.g. <code>C:\tools\clumsy\clumsy.exe</code></p></li>
+      <li><b>Which traffic</b><p>The port or server address the target program uses, and whether it is TCP or UDP. Without this the agent has to guess a filter, and a broad filter degrades all communication on the PC (including the agent's own connection).</p></li>
+      <li><b>What condition you want</b><p>Plain words are enough: "150 ms latency and 5% loss", "a bad 3G connection", "a 5-second outage every 30 seconds".</p></li>
+      <li><b>For how long</b><p>The agent passes this as <code>--timeout</code>. It is the safety net that guarantees the network recovers even if something goes wrong.</p></li>
+    </ol>
+
+    <div class="callout callout-warn">
+      <span class="ico">🛡️</span>
+      <p><strong>There is one thing only you can do.</strong> Open the terminal the agent runs in <strong>as Administrator</strong> (on Linux, <code>sudo</code> or <code>CAP_NET_ADMIN</code>).
+      Intercepting packets needs that right, and an agent cannot elevate itself. Without it, clumsy says so and exits with code 3.</p>
+    </div>
+
+    <h3 style="margin-top:28px;">Example prompts</h3>
+    <div class="code-block"><button class="copy-btn" type="button">Copy</button><pre>Use C:\tools\clumsy\clumsy.exe to simulate a poor mobile connection for my game client.
+It talks to the server over UDP port 7777. Add 150 ms of latency and 5% packet loss for 60 seconds,
+then show me the statistics. Run clumsy.exe --help first to see the options.</pre></div>
+    <div class="code-block"><button class="copy-btn" type="button">Copy</button><pre>Start clumsy in the background and control it over its REST API. Read http://127.0.0.1:8080/llms.txt first.
+Target: TCP to 10.0.0.5 port 443. Begin with 100 ms of lag, then add 2% more packet loss every 20 seconds,
+and tell me when my client's reconnect logic kicks in. Shut clumsy down afterwards.</pre></div>
+    <div class="code-block"><button class="copy-btn" type="button">Copy</button><pre>Write a clumsy scenario file that reproduces a subway ride:
+30 s of normal 4G, a 5 s blackout, 30 s of 3G-like conditions, then recovery.
+Run it against UDP port 9000 with --scenario and save an HTML report.</pre></div>
+
+    <h3 style="margin-top:28px;">Why AI agents handle it well</h3>
+    <div class="ref-wrap">
+      <table class="api-table">
+        <tr><th>What an agent needs</th><th>What clumsy provides</th></tr>
+        <tr><td>Learn the usage with no prior knowledge</td><td><code>clumsy --help</code> is generated from the code: a one-line description per module, range and default per parameter, and the exit codes.</td></tr>
+        <tr><td>Notice its own mistakes</td><td>Unknown options are refused before anything starts, with the correct name suggested. e.g. <code>--delay</code> → <code>--lag on --lag-time &lt;ms&gt;</code></td></tr>
+        <tr><td>Tell success from failure</td><td>Distinct exit codes (0 / 2 / 3 / 4), and if capture cannot start it fails immediately instead of waiting out the timeout.</td></tr>
+        <tr><td>A self-describing API</td><td><code>GET /api/docs</code> (endpoints, example bodies, rules), <code>GET /api/modules</code> (parameter types, ranges, current values)</td></tr>
+        <tr><td>Actionable errors</td><td>Responses carry <code>warnings</code>, <code>unknownKeys</code>, <code>validKeys</code> and the <code>params</code> actually applied, and a request that applied nothing is answered with an error.</td></tr>
+        <tr><td>A guide written for agents</td><td><code>GET /llms.txt</code> (English), <code>GET /llms_kr.txt</code> (Korean). In the repository they live in <code>etc/web/</code> (<a href="../etc/web/llms.txt"><code>llms.txt</code></a>).</td></tr>
+        <tr><td>Safety nets</td><td><code>--timeout</code> ends the run no matter what, and <code>POST /api/quit</code> ends it the moment it is requested.</td></tr>
+      </table>
+    </div>
+
+    <div class="callout callout-info">
+      <span class="ico">💡</span>
+      <p><strong>Tip.</strong> Add one line to your request: "run <code>clumsy --help</code> first" or "read <code>llms.txt</code>".
+      Otherwise a model tends to try option names from other tools first (<code>--delay</code>, <code>--loss</code>). clumsy rejects those with a hint, but the line saves that round trip.
+      For a project you test repeatedly, put the path, the port and "always pass <code>--timeout</code>" in <code>CLAUDE.md</code> or <code>AGENTS.md</code> so you don't have to explain it every time.</p>
+    </div>
+  </div>
+</section>
+
+<section id="faq">
+  <div class="container">
+    <span class="section-kicker">Troubleshooting</span>
+    <h2>Frequently asked questions</h2>
+
+    <details class="faq-item" open>
+      <summary>I get an error saying Administrator rights are required</summary>
+      <p>clumsy has to load a network driver (WinDivert) to intercept packets. <strong>Restart</strong> your console (Command Prompt/PowerShell)
+      <strong>as Administrator</strong>. If doing that by hand every time is a chore, add <code>--elevate on</code> and clumsy will bring up the UAC prompt for you.</p>
+    </details>
+
+    <details class="faq-item">
+      <summary>I entered a filter and pressed Start, but nothing happens</summary>
+      <p>The two most common causes: ① for a localhost test, check whether the <code>outbound</code> condition is missing (<code>inbound and loopback</code> does not work).
+      ② You turned the module on, but check that its <strong>Inbound/Outbound</strong> checkboxes aren't set opposite to the actual traffic direction.</p>
+    </details>
+
+    <details class="faq-item">
+      <summary>It says it is already running and quits</summary>
+      <p>Only one clumsy instance can run at a time. If one is already up, <strong>the newly launched one</strong> exits with code 4 and the existing instance keeps running.
+      Keep using the existing one from the dashboard or the REST API, or shut it down with <code>POST /api/quit</code> (or Ctrl+C in its console window) and launch again.</p>
+    </details>
+
+    <details class="faq-item">
+      <summary>I passed an option and it quit right away with "unknown option"</summary>
+      <p>The option name is wrong or the value is in an unusable form. clumsy doesn't silently ignore bad options; it stops before starting anything (exit code 2) and tells you the correct name.
+      Switch to the name shown in the message or look it up in <code>clumsy.exe --help</code>. Switches need a value: <code>--lag on</code>, not <code>--lag</code>.</p>
+    </details>
+
+    <details class="faq-item">
+      <summary>I asked an AI agent and it says it has no permission</summary>
+      <p>The terminal the agent runs in isn't elevated. <strong>Restart</strong> the terminal (or the IDE that launched the agent) <strong>as Administrator</strong> and ask again.
+      An agent cannot elevate itself. See the <a href="#llm">AI agents section</a> for details.</p>
+    </details>
+
+    <details class="faq-item">
+      <summary>I set a low Bandwidth limit, but at first it doesn't seem to apply</summary>
+      <p>That's normal. The bandwidth cap is a token bucket, and it <strong>starts full, at 64 KB or limit × 2 seconds, whichever is larger</strong>.
+      So in a short test the early traffic looks as if it went straight through — run the test a bit longer (or with more data).</p>
+    </details>
+
+    <details class="faq-item">
+      <summary>The dashboard won't open in my browser</summary>
+      <p>Check that you typed the address from the banner printed in the console exactly (default <code>http://127.0.0.1:8080/</code>). If another program
+      is already using port 8080, pick a different port, e.g. <code>--web-port 9090</code>.</p>
+    </details>
+
+    <details class="faq-item">
+      <summary>I want to control this clumsy instance remotely from another PC</summary>
+      <p>Run it with <code>--web-bind 0.0.0.0 --web-token your-token</code> and it can be reached from outside. When bound to an outside address,
+      a token is mandatory, so every request must carry the <code>X-Clumsy-Token</code> header or a <code>?token=</code> query string. Only do this on a trusted test network.</p>
+    </details>
+
+    <details class="faq-item">
+      <summary>I switched on Set TCP RST but nothing happens</summary>
+      <p>Check the probability first. <code>reset-chance</code> defaults to <strong>0%</strong>, so <code>--reset on</code> alone touches no packets — raise it, as in <code>--reset-chance 5.0</code>, or press the dashboard's <code>RST next packet</code> button.
+      Also, the Reset module is <strong>TCP only</strong> and has no effect on UDP traffic. Make sure your filter includes a <code>tcp</code> condition and that the target service really uses TCP.</p>
+    </details>
+  </div>
+</section>
+
+<footer>
+  <div class="container">
+    <p>This guide is based on the clumsy repository's <a href="../manual_en-1.md"><code>manual_en-1.md</code></a> (full reference), <a href="../README.md"><code>README.md</code></a> and <a href="LINUX.md"><code>docs/LINUX.md</code></a> (Linux build, Korean).</p>
+    <p>For deeper topics (the full scenario JSON syntax, pcap replay, plugins, Prometheus integration and more), see <a href="../manual_en-1.md"><code>manual_en-1.md</code></a> at the project root.</p>
+  </div>
+</footer>
+
+<a href="#top" class="back-top" id="backTop" aria-label="Back to top">↑</a>
+
+<script>
+(function(){
+  var STORAGE_KEY = 'clumsy-guide-theme';
+  var btn = document.getElementById('themeBtn');
+  var order = ['auto','light','dark'];
+  var labels = {auto:'🌓 Auto', light:'☀️ Light', dark:'🌙 Dark'};
+
+  function current(){
+    try{ return localStorage.getItem(STORAGE_KEY) || 'auto'; }catch(e){ return 'auto'; }
+  }
+  function apply(mode){
+    if(mode === 'light') document.documentElement.setAttribute('data-theme','light');
+    else if(mode === 'dark') document.documentElement.setAttribute('data-theme','dark');
+    else document.documentElement.removeAttribute('data-theme');
+    if(btn) btn.textContent = labels[mode];
+  }
+  apply(current());
+  if(btn){
+    btn.addEventListener('click', function(){
+      var next = order[(order.indexOf(current()) + 1) % order.length];
+      try{ localStorage.setItem(STORAGE_KEY, next); }catch(e){}
+      apply(next);
+    });
+  }
+
+  document.querySelectorAll('.copy-btn').forEach(function(b){
+    b.addEventListener('click', function(){
+      var pre = b.parentElement.querySelector('pre');
+      if(!pre) return;
+      var text = pre.textContent;
+      var done = function(){ var old=b.textContent; b.textContent='Copied'; setTimeout(function(){ b.textContent=old; }, 1400); };
+      if(navigator.clipboard && navigator.clipboard.writeText){
+        navigator.clipboard.writeText(text).then(done).catch(done);
+      } else {
+        var ta = document.createElement('textarea');
+        ta.value = text; document.body.appendChild(ta); ta.select();
+        try{ document.execCommand('copy'); }catch(e){}
+        document.body.removeChild(ta); done();
+      }
+    });
+  });
+
+  var catBtns = document.querySelectorAll('.cat-btn');
+  var cards = document.querySelectorAll('.mod-card');
+  catBtns.forEach(function(cb){
+    cb.addEventListener('click', function(){
+      catBtns.forEach(function(x){ x.classList.remove('active'); });
+      cb.classList.add('active');
+      var cat = cb.getAttribute('data-cat');
+      cards.forEach(function(card){
+        card.classList.toggle('is-hidden', cat !== 'all' && card.getAttribute('data-cat') !== cat);
+      });
+    });
+  });
+
+  var backTop = document.getElementById('backTop');
+  window.addEventListener('scroll', function(){
+    backTop.classList.toggle('show', window.scrollY > 600);
+  }, {passive:true});
+
+  if('IntersectionObserver' in window){
+    var demos = document.querySelectorAll('.demo, .arch');
+    var io = new IntersectionObserver(function(entries){
+      entries.forEach(function(en){
+        en.target.style.setProperty('--play', en.isIntersecting ? 'running' : 'paused');
+        en.target.querySelectorAll('*').forEach(function(el){ el.style.animationPlayState = en.isIntersecting ? 'running' : 'paused'; });
+      });
+    }, {threshold:0.15});
+    demos.forEach(function(d){ io.observe(d); });
+  }
+})();
+</script>
+
+</body>
+</html>

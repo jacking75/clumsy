@@ -14,6 +14,7 @@ It uses [WinDivert](http://reqrypt.org/windivert.html) to intercept live network
 * Control network conditions interactively, with a live view of the current state.
 * Runs as a console app + built-in web dashboard — no external GUI library dependency.
 * Remote/automated control via REST API, Server-Sent Events, and Named Pipe.
+* **LLM / AI-agent friendly** — an AI coding agent can operate clumsy from `clumsy --help` and the self-describing REST API alone, with no prior knowledge of the tool. You describe the network condition in plain language; the agent does the rest. See [Using clumsy with an LLM or AI agent](#using-clumsy-with-an-llm-or-ai-agent).
 
 
 ## Prerequisites
@@ -34,6 +35,7 @@ To run clumsy, the following files must sit next to the executable:
 | `config.json` | Filter preset definitions (recommended) | `etc/config.json` |
 | `config.txt` | Filter preset definitions (legacy) | `etc/config.txt` |
 | `web/index.html` | Web dashboard (without it, only the REST API works) | `etc/web/index.html` |
+| `web/llms.txt`, `web/llms_kr.txt` | Usage guide for AI agents in English and Korean, served at `GET /llms.txt` and `GET /llms_kr.txt` | `etc/web/` |
 
 > A post-build step copies these files into the output directory automatically.
 
@@ -141,6 +143,80 @@ clumsy 0.4 - console + web network condition simulator
 Open that address in a browser to access filter configuration, module toggles/parameters, live statistics graphs, the filter builder, and profile/scenario/pcap controls.
 
 
+## Using clumsy with an LLM or AI agent
+
+clumsy is built to be operated by an AI coding agent (Claude Code, Codex, Cursor, Copilot agents, …) as well as by a person. You say what network condition you want in plain language; the agent turns it into a command line or REST calls, runs the test, reads the statistics, and puts the network back to normal.
+
+### Why it works well with an LLM
+
+| What an agent needs | What clumsy gives it |
+|---|---|
+| Learn the tool without prior knowledge | `clumsy --help` is generated from the code: every module with a one-line description, every parameter with its range and default, and the exit codes. It needs no privileges and starts nothing. |
+| Notice its own mistakes | An unknown option or an unusable value stops clumsy **before** anything starts (exit code 2) and the message names the fix. Nothing is silently ignored. |
+| Know whether it worked | Distinct exit codes (`0` ok, `2` bad command line, `3` capture could not start, `4` already running). A capture that cannot start — not elevated, bad filter — fails immediately instead of idling until the timeout. |
+| A self-describing API | `GET /api/docs` lists every endpoint with an example body and the conventions; `GET /api/modules` lists every parameter with type, range and current value. |
+| Errors it can act on | Every API reply is JSON with a `status`. A wrong path or method is answered with what to use instead. A reply to a setting carries `warnings` (clamped or refused values), `unknownKeys` + `validKeys`, the `params` actually in effect, and whether a capture is running. A request in which nothing could be applied is an error, never a silent `ok`. |
+| A guide written for it | [`etc/web/llms.txt`](etc/web/llms.txt) (Korean: [`llms_kr.txt`](etc/web/llms_kr.txt)), also served by the running instance at `GET /llms.txt` and `GET /llms_kr.txt`: rules, module chooser, filter syntax, two step-by-step recipes, troubleshooting. |
+| A way to verify | `GET /api/stats` shows packets captured and packets each module affected. |
+| A safety net | `--timeout` ends the run no matter what; `POST /api/quit` ends it on request. |
+
+What a typo looks like to the agent:
+
+```
+> clumsy.exe --filter "udp and udp.DstPort == 7777" --delay 150 --lag-ms 150 --jitter-dist gaussian
+clumsy: unknown option --delay - clumsy spells that --lag on --lag-time <ms>
+clumsy: unknown option --lag-ms - lag takes: --lag on|off, --lag-inbound, --lag-outbound, --lag-time
+clumsy: --jitter-dist: "gaussian" is not one of uniform,normal,pareto
+Nothing was started. Run clumsy --help for every option.
+(exit code 2)
+```
+
+```
+POST /api/modules/lag  {"lag-time":99999,"lag-ms":5}
+{"status":"ok","module":"lag","applied":1,"enabled":false,"capturing":false,
+ "params":{"lag-time":"15000","lag-inbound":"true","lag-outbound":"true"},
+ "unknownKeys":"lag-ms","validKeys":"lag-inbound,lag-outbound,lag-time",
+ "warnings":["lag-time: 99999 is outside 0..15000, clamped to 15000"]}
+```
+
+### How to ask
+
+Give the agent four things, and it has everything it needs:
+
+1. **Where clumsy is** — the path to `clumsy.exe`.
+2. **Which traffic** — the application's port or server address, and TCP or UDP.
+3. **What condition** — in plain words: "150 ms latency and 5 % loss", "a bad 3G connection", "a 5-second outage every 30 seconds".
+4. **For how long** — and that it should stop clumsy when done.
+
+One more thing only you can do: **start the agent's terminal as Administrator** (Windows) or with `sudo` / `CAP_NET_ADMIN` (Linux). Capturing packets needs it, and an agent cannot elevate itself.
+
+Example prompts:
+
+> Use `C:\tools\clumsy\clumsy.exe` to simulate a poor mobile connection for my game client. It talks to the server over UDP port 7777. Add 150 ms of latency and 5 % packet loss for 60 seconds, then show me the statistics. Run `clumsy.exe --help` first to see the options.
+
+> Start clumsy in the background and control it over its REST API — read `http://127.0.0.1:8080/llms.txt` first. Target: TCP to 10.0.0.5 port 443. Begin with 100 ms of lag, then add 2 % more packet loss every 20 seconds until my client's reconnect logic kicks in. Tell me at which loss level that happened, and shut clumsy down afterwards.
+
+> Write a clumsy scenario file that reproduces a subway ride: 30 s of normal 4G, a 5 s blackout, 30 s of 3G-like conditions, then recovery. Run it against UDP port 9000 with `--scenario` and save an HTML report.
+
+> My service on localhost:5000 creates duplicate orders on flaky networks. Reproduce it with clumsy: try packet duplication, reordering and TCP resets one at a time on loopback traffic to port 5000, and tell me which one triggers the bug.
+
+Tips:
+
+- **Point the agent at the documentation once** ("run `clumsy --help` first" or "read `llms.txt`"). Without it a model reaches for option names from other tools (`--delay`, `--loss`); clumsy will reject those with a hint, but one line in the prompt saves the round trip.
+- **Always give the port or address.** Without it the agent has to guess a filter, and a broad filter degrades everything on the machine — including the agent's own connection to its model.
+- **State the duration.** The agent will pass it as `--timeout`, which also guarantees the network recovers if anything goes wrong.
+- For a project you test repeatedly, put the facts in your agent instructions file (`CLAUDE.md`, `AGENTS.md`, …) so you do not have to repeat them:
+
+  ```markdown
+  ## Network condition testing
+  Use clumsy (`C:\tools\clumsy\clumsy.exe`) to degrade the network on purpose.
+  Before first use run `clumsy.exe --help`; while it runs, `GET http://127.0.0.1:8080/llms.txt`
+  is the guide for agents and `GET /api/docs` lists the REST API.
+  Our game traffic is UDP port 7777. Always pass `--timeout`, and stop clumsy when the test ends.
+  The terminal must be running as Administrator.
+  ```
+
+
 ## CLI usage
 
 Modules can be configured via a parameterized command-line mode:
@@ -149,7 +225,9 @@ Modules can be configured via a parameterized command-line mode:
 clumsy.exe --filter "udp and outbound" --lag on --lag-time 100 --drop on --drop-chance 5.0
 ```
 
-Run `clumsy.exe --help` to see the full argument list.
+Run `clumsy.exe --help` to see the full argument list — it is generated from the code, so it always shows every module parameter with its range and default.
+
+Every option is a `--key value` pair (switches are spelled out: `--lag on`). An unknown option or an unusable value stops clumsy before anything starts; an out-of-range number is clamped with a warning.
 
 | Module | Example arguments |
 |------|----------|
@@ -171,7 +249,7 @@ Every module accepts `--<module>-inbound on|off` / `--<module>-outbound on|off` 
 Other options:
 - `--timeout <sec>`: exit automatically after the given time
 - `--scenario scenario.json`: run a scenario file
-- `--profile mobile-3g`: apply a saved profile
+- `--profile <name>`: apply a profile you saved earlier (dashboard or `POST /api/profiles`); none ship by default
 - `--stats-log stats.csv`: write a statistics log file (JSON if the extension is `.json`)
 - `--stats-interval 1`: statistics logging interval, in seconds
 - `--stats-console 10`: console status summary interval, in seconds (`0` to disable)
@@ -183,11 +261,21 @@ Other options:
 - `--enable-plugins <dir>`: load custom module DLLs (disabled by default, security-sensitive)
 - `--verbose on`: per-packet trace logging
 - `--elevate on`: relaunch via UAC if not already running as administrator
+- `--version`: print the version
+
+Exit codes:
+
+| Code | Meaning |
+|------|---------|
+| `0` | clean exit (`--timeout` reached, Ctrl+C, `POST /api/quit`) |
+| `2` | bad command line: unknown option, unusable value, or a `--profile` / `--scenario` that could not be loaded — nothing was started |
+| `3` | the capture (`--filter`) or replay (`--replay-in`) could not start, e.g. not elevated or the filter did not parse |
+| `4` | another clumsy is already running |
 
 
 ## Web dashboard and REST API
 
-The default bind is `127.0.0.1:8080`; on localhost, no token is required.
+The default bind is `127.0.0.1:8080`; on localhost, no token is required unless you set one with `--web-token`.
 
 | Argument | Description |
 |------|------|
@@ -198,10 +286,12 @@ The default bind is `127.0.0.1:8080`; on localhost, no token is required.
 
 For external bindings, pass the token via the `X-Clumsy-Token` header or a `?token=` query string.
 
-Key endpoints (see `GET /api/docs` for the full list):
+Key endpoints (see `GET /api/docs` for the full list, with an example body for each):
 
 | Method / path | Description |
 |---|---|
+| `GET /api/docs` | every endpoint with a description, an example body, and the API conventions |
+| `GET /llms.txt` | plain-text usage guide for AI agents (`GET /llms_kr.txt` for Korean) |
 | `GET /api/health` | liveness check (no auth, for CI health checks) |
 | `GET /metrics` | Prometheus text exposition format (no auth) |
 | `GET /api/status` | capture status, filter, last message |
@@ -233,6 +323,8 @@ curl -X POST http://127.0.0.1:8080/api/modules/drop \
      -H "Content-Type: application/json" \
      -d "{\"enabled\":true,\"drop-chance\":10.0}"
 ```
+
+Every reply is JSON with `"status": "ok"` or `"error"`. A reply can be `ok` and still report that it did not do exactly what was asked: `warnings` lists values that were clamped or refused, `unknownKeys` lists keys no module has, and `params` shows the values in effect after the request. A request in which nothing could be applied is answered with a `400` error rather than a silent `ok`. Module settings only act on traffic while a capture is running, so `POST /api/filter` comes first; `capturing` in the reply tells you whether one is. Scenario loads (`POST /api/scenario/load`, `loadinline`) report unknown keys, bad values and unknown metrics in `warnings` as well, and `loadinline` takes the steps as a plain JSON array.
 
 ### Prometheus / Grafana
 
@@ -326,6 +418,8 @@ clumsy/
 │   ├── config.json     # filter presets (JSON)
 │   ├── config.txt      # filter presets (legacy)
 │   ├── web/index.html  # web dashboard (single static file)
+│   ├── web/llms.txt    # usage guide for AI agents (served at /llms.txt)
+│   ├── web/llms_kr.txt # the same guide in Korean (served at /llms_kr.txt)
 │   └── clumsy.rc       # Windows resource file
 ├── msvc/               # Visual Studio project
 │   └── clumsy.sln
@@ -341,18 +435,24 @@ clumsy/
 │   └── linux/nfqtest.cpp          # NFQUEUE capability probe
 ├── docs/
 │   ├── CODING_STYLE.md # code style principles
-│   └── LINUX.md        # Linux build/run/limitations guide
+│   ├── LINUX.md        # Linux build/run/limitations guide
+│   ├── guide_en-2.html # beginner's guide (English)
+│   └── guide.html      # beginner's guide (Korean)
 ├── Makefile            # Linux build
+├── doc_numbers.md      # serial-number ledger for new documents
+├── manual_en-1.md      # user manual (English)
 └── manual.md           # user manual (Korean)
 ```
 
 
 ## Further documentation
 
-- **User manual**: [manual.md](manual.md) — full feature, web UI, CLI, and API reference (Korean)
-- **Linux guide**: [docs/LINUX.md](docs/LINUX.md) — build, privileges, iptables integration, platform differences
-- **Code style**: [docs/CODING_STYLE.md](docs/CODING_STYLE.md) — conventions since the C++ rewrite
-- **Development roadmap**: [docs/ROADMAP-v2.md](docs/ROADMAP-v2.md) — completed work and future plans
+- **Guide for AI agents**: [etc/web/llms.txt](etc/web/llms.txt) (Korean: [etc/web/llms_kr.txt](etc/web/llms_kr.txt)) — rules, module chooser, filter syntax, recipes, troubleshooting
+- **User manual**: [manual_en-1.md](manual_en-1.md) — full feature, web UI, CLI, and API reference (Korean: [manual.md](manual.md))
+- **Beginner's guide**: [docs/guide_en-2.html](docs/guide_en-2.html) — illustrated walkthrough, including an AI-agent section (Korean: [docs/guide.html](docs/guide.html))
+- **Linux guide**: [docs/LINUX.md](docs/LINUX.md) — build, privileges, iptables integration, platform differences (Korean)
+- **Code style**: [docs/CODING_STYLE.md](docs/CODING_STYLE.md) — conventions since the C++ rewrite (Korean)
+- **Development roadmap**: [docs/ROADMAP-v2.md](docs/ROADMAP-v2.md) — completed work and future plans (Korean)
 
 
 ## License

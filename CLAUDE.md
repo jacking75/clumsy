@@ -220,10 +220,54 @@ WinDivertRecv()
 4. `main.cpp` 의 `modules[]` 배열에 추가 (처리 순서 결정)
 5. `MODULE_CNT` 값 증가 (`common.h`)
 6. `msvc/clumsy.vcxproj`의 `ClCompile` 목록과 `Makefile`의 `SOURCES`에 추가
+7. `utils.cpp`의 `moduleDescription()` 표에 한 줄 설명 추가 (`--help`와 `GET /api/modules`에 표시)
+8. `etc/web/llms.txt`와 `etc/web/llms_kr.txt`의 모듈 표에 파라미터 추가 — API 테스트가 양쪽의 누락을 잡습니다
 
 패킷 방향은 `pac->meta.outbound`로 판별하고, 페이로드 조작이 필요하면 위의 백엔드 중립
 헬퍼를 쓰세요. `windivert.h`를 include하는 순간 리눅스 빌드가 깨집니다.
 
 CLI 인수(`--<name> on`, `--<name>-<param> <값>`)와 REST API 노출은 자동입니다:
 `main.cpp`의 `applyCliModuleParams()`가 `paramSpecs`를 순회하고,
-`controlapi.cpp`가 `modules[]`를 순회하기 때문입니다.
+`controlapi.cpp`가 `modules[]`를 순회하기 때문입니다. `--help`의 모듈 목록도
+`printModuleUsage()`가 `paramSpecs`에서 생성합니다.
+
+---
+
+## LLM/스크립트가 쓰는 인터페이스 (깨면 안 되는 약속)
+
+이 도구는 사람뿐 아니라 AI 에이전트가 `--help`와 REST 응답만 보고 다루는 것을 전제로 합니다.
+에이전트는 결과로만 판단하므로, **조용히 무시하거나 조용히 바꾸는 동작을 만들지 마세요.**
+
+- **모듈 외 CLI 옵션을 추가하면** `main.cpp`의 `globalArgs[]`와 `printUsage()`에 함께 넣습니다.
+  빠뜨리면 `validateCliArgs()`가 그 옵션을 "unknown option"으로 거부합니다(종료 코드 2).
+- **외부에서 들어온 값은 검증 경로로 적용합니다**: `applyModuleParamChecked()` /
+  `applyModuleKVChecked()`(`utils.cpp`). `setParam`은 범위 초과를 조용히 자르고
+  `atoi("abc")`를 0으로 받기 때문에 직접 부르면 안 됩니다. 검증 없는 `applyModuleKV()`는
+  clumsy가 직접 쓴 값(프로파일)과 로드 시 `scenarioLint()`를 거친 시나리오 전용입니다.
+- **모든 `/api` 응답은 `status`가 있는 JSON**입니다. 오류도 마찬가지이며(`sendApiNotFound`),
+  메시지에는 무엇을 대신 써야 하는지를 담습니다.
+- **종료 코드**: 0 정상, 2 명령줄 오류, 3 캡처/재생 시작 실패, 4 이미 실행 중.
+  `--filter`를 줬는데 캡처를 못 시작하면 대기하지 않고 3으로 끝납니다.
+- **엔드포인트를 추가하면** `controlapi.cpp`의 `apiDocsJson()` 표에 설명·예시 본문과 함께 넣습니다.
+- 에이전트용 가이드는 `etc/web/llms.txt`(영문)와 `etc/web/llms_kr.txt`(한국어) 한 쌍입니다
+  (`GET /llms.txt`, `GET /llms_kr.txt`로 제공, 실행 파일 옆 `web/`에 배포). 손으로 쓰는 참조 문서이므로
+  동작을 바꾸면 **둘 다** 고칩니다.
+
+### 문서는 한국어·영어 양쪽을 함께 고친다
+
+사용자에게 보이는 동작을 바꾸면 두 언어 문서를 같은 변경에서 함께 갱신합니다. 한쪽만 고치고 끝내지 마세요.
+
+| 영문 | 한국어 |
+|------|--------|
+| `README.md` | `README_kr.md` |
+| `etc/web/llms.txt` | `etc/web/llms_kr.txt` |
+| `manual_en-1.md` | `manual.md` |
+| `docs/guide_en-2.html` | `docs/guide.html` |
+
+매뉴얼과 가이드는 두 언어판의 절 구성(제목 순서·개수, 가이드의 section id)이 1:1로 같습니다. 한쪽에 절을
+추가·삭제하면 다른 쪽도 똑같이 맞춥니다. 가이드 두 파일의 `<style>`·`<script>`는 사용자에게 보이는 문자열 외에는
+동일하게 유지합니다.
+
+`docs/LINUX.md`, `docs/CODING_STYLE.md`, `docs/ROADMAP-v2.md`는 한국어판만 있습니다. `LINUX.md`에 적은 내용 중
+사용자가 알아야 하는 것(옵션, 권한, 플랫폼 차이)은 영문 독자가 볼 수 있도록 `README.md`·`manual_en-1.md`에도 들어가야 합니다.
+`--help`와 API 메시지는 영문(ASCII) 전용입니다.

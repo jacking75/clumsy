@@ -1,5 +1,7 @@
 # clumsy 사용 매뉴얼
 
+**Language**: [English](manual_en-1.md) | 한국어
+
 ---
 
 # 1부 — 사용 방법
@@ -11,6 +13,8 @@
 - **Windows 7 / 8 / 10 / 11** (64비트 전용)
 - **관리자 권한 필수** — clumsy는 네트워크 드라이버를 로드하므로 반드시 관리자로 실행해야 합니다.
 - 웹 대시보드를 볼 브라우저 (별도 설치 불필요, 로컬에서 동작)
+- **Linux**도 지원합니다 (NFQUEUE 지원 커널, `CAP_NET_ADMIN` 필요). 이 매뉴얼은 Windows 기준이며,
+  리눅스의 빌드·권한·iptables 연동·차이점은 [docs/LINUX.md](docs/LINUX.md)에 정리되어 있습니다.
 
 ### 실행 방법
 
@@ -38,14 +42,17 @@ clumsy 0.4 - console + web network condition simulator
 이 상태에서 캡처를 시작하면 다음과 같은 명확한 오류가 반환됩니다:
 
 ```
-clumsy needs Administrator rights to open the WinDivert driver.
-Restart the console as Administrator.
+clumsy needs Administrator rights to open the WinDivert driver. Restart the console as Administrator.
 ```
+
+단, 명령줄에 `--filter`를 줬다면 대기하지 않고 이 오류를 출력한 뒤 종료 코드 `3`으로 끝납니다
+([5장](#인수-검증과-종료-코드) 참조).
 
 `--elevate on`을 붙이면 UAC 창을 띄워 관리자 권한으로 자기 자신을 재실행합니다
 (새 콘솔 창이 열리고 원래 인스턴스는 종료됩니다).
 
-> **주의**: 이미 실행 중인 clumsy가 있으면 두 번째 실행은 자동으로 종료됩니다. 한 번에 하나만 실행 가능합니다.
+> **주의**: 이미 실행 중인 clumsy가 있으면 새로 실행한 쪽이 `There's already an instance of clumsy running. Aborting.`을
+> 출력하고 종료 코드 `4`로 끝납니다. 기존 인스턴스는 그대로 동작합니다. 한 번에 하나만 실행 가능합니다.
 
 > **버전 0.4부터의 변경**: 기존 IUP 기반 데스크톱 GUI 창은 제거되었습니다.
 > 모든 조작은 웹 대시보드 · CLI 인수 · REST API · Named Pipe API로 수행합니다.
@@ -134,20 +141,24 @@ Capturing. filter="udp and outbound"
 
 필터는 "어떤 패킷을 clumsy가 가로챌 것인가"를 결정합니다. 필터에 걸린 패킷만 지연/드롭 등의 효과를 받습니다.
 
-### Presets 드롭다운 활용
+### Preset 드롭다운 활용
 
-창 오른쪽의 **Presets** 드롭다운을 클릭하면 `etc/config.json` (또는 레거시 `etc/config.txt`)에 저장된 미리 정의된 필터 목록이 나타납니다. 선택하면 필터 입력창에 자동으로 채워집니다.
+대시보드 **CAPTURE** 영역의 **Preset** 드롭다운을 열면 `config.json` (또는 레거시 `config.txt`)에 저장된 미리 정의된 필터 목록이 나타납니다. 두 파일은 `clumsy.exe`와 같은 폴더에서 읽으며, 저장소의 원본은 `etc/`에 있습니다. 선택하면 필터 입력창에 자동으로 채워집니다.
 
 기본 제공 프리셋:
 
 | 프리셋 이름 | 설명 |
 |------------|------|
-| localhost ipv4 all | 내 PC 내부 통신(loopback) 전체 |
+| localhost ipv4 all | 내 PC 내부 통신(loopback) 전체 (`outbound and loopback`) |
 | localhost ipv4 tcp | 내 PC 내부 TCP 통신 |
 | localhost ipv4 udp | 내 PC 내부 UDP 통신 |
-| all sending packets | 모든 송신 패킷 |
-| all receiving packets | 모든 수신 패킷 |
-| all ipv4 against specific ip | 특정 IP와의 통신 |
+| all sending packets | 모든 송신 패킷 (`outbound`) |
+| all receiving packets | 모든 수신 패킷 (`inbound`) |
+| all ipv4 against specific ip | 특정 IP와의 통신 (예시 주소 `198.51.100.1`) |
+| tcp ipv4 against specific ip | 특정 IP와의 TCP 통신 |
+| udp ipv4 against specific ip | 특정 IP와의 UDP 통신 |
+| all ipv4 against port | 특정 포트의 TCP·UDP 통신 (예시 포트 `12354`) |
+| tcp ipv4 against port | 특정 포트의 TCP 통신 |
 | udp ipv4 against port | 특정 포트의 UDP 통신 |
 
 ### 필터 직접 입력
@@ -189,6 +200,7 @@ udp and outbound and loopback
 CLI에서는 `--filter "식"`을 주면 실행 즉시 캡처가 시작됩니다.
 REST API로는 `POST /api/filter` / `POST /api/stop`, Named Pipe API로는
 `{"cmd":"filter",...}` / `{"cmd":"stop_capture"}`가 같은 동작을 합니다.
+이미 캡처 중일 때 `POST /api/filter`를 보내면 기존 캡처를 멈추고 새 필터로 다시 시작합니다.
 
 ### 필터 빌더
 
@@ -224,9 +236,14 @@ clumsy.exe --filter "udp" --process game.exe --lag on --lag-time 100
 
 ## 4. 기능(모듈) 설명
 
-Start를 누른 후, Functions 영역에서 원하는 기능의 체크박스를 켜면 효과가 적용됩니다. 여러 기능을 동시에 켤 수 있습니다.
+대시보드 **MODULES** 영역에서 원하는 기능의 체크박스를 켜면 효과가 적용됩니다. 여러 기능을 동시에 켤 수 있습니다.
+모듈은 캡처 전에 켜 둘 수도 있지만, 실제 트래픽에 작용하는 것은 Start로 캡처가 돌고 있는 동안뿐입니다.
+모든 모듈은 꺼진 상태로 시작하며, 아래 순서대로 각 패킷에 적용됩니다.
 
-각 기능에는 공통으로 **Inbound(수신)** / **Outbound(송신)** 체크박스가 있어, 방향별로 적용 여부를 선택할 수 있습니다.
+각 기능에는 공통으로 **Inbound(수신)** / **Outbound(송신)** 체크박스가 있어, 방향별로 적용 여부를 선택할 수 있습니다
+(`--<모듈>-inbound`, `--<모듈>-outbound`, 둘 다 기본 on).
+
+아래 표의 "항목"은 대시보드에 표시되는 이름이고, 괄호 안은 CLI·API에서 쓰는 파라미터 키입니다.
 
 ---
 
@@ -236,7 +253,7 @@ Start를 누른 후, Functions 영역에서 원하는 기능의 체크박스를 
 
 | 항목 | 설명 | 기본값 | 범위 |
 |------|------|--------|------|
-| Delay(ms) | 지연 시간 | 50ms | 0 ~ 15000ms |
+| Delay (ms) (`lag-time`) | 지연 시간 | 50ms | 0 ~ 15000ms |
 
 **동작 방식**: 패킷을 내부 버퍼에 저장했다가 지정 시간이 지나면 전송합니다. 모든 패킷이 동일한 시간만큼 지연됩니다.
 
@@ -254,9 +271,9 @@ Start를 누른 후, Functions 영역에서 원하는 기능의 체크박스를 
 
 | 항목 | 설명 | 기본값 | 범위 |
 |------|------|--------|------|
-| Min(ms) | 최소 지연 | 20ms | 0 ~ 5000ms |
-| Max(ms) | 최대 지연 | 100ms | 0 ~ 5000ms |
-| Distribution | 지연 분포 모양 | uniform | uniform / normal / pareto |
+| Min (ms) (`jitter-min`) | 최소 지연 | 20ms | 0 ~ 5000ms |
+| Max (ms) (`jitter-max`) | 최대 지연 | 100ms | 0 ~ 5000ms |
+| Distribution (`jitter-dist`) | 지연 분포 모양 | uniform | uniform / normal / pareto |
 
 **동작 방식**: 각 패킷에 `[Min, Max]` 범위의 랜덤 지연을 부여합니다. 지연이 다르므로 패킷 도착 순서가 바뀔 수 있습니다(자연스러운 순서 뒤섞임 발생).
 
@@ -311,7 +328,7 @@ clumsy --filter "udp and outbound" --jitter on \
 
 | 항목 | 설명 | 기본값 | 범위 |
 |------|------|--------|------|
-| Chance(%) | 드롭 확률 | 10.0% | 0 ~ 100% |
+| Chance (%) (`drop-chance`) | 드롭 확률 | 10.0% | 0 ~ 100% |
 
 **동작 방식**: 각 패킷에 대해 독립적으로 확률을 계산합니다. 10%면 평균적으로 10개 중 1개가 버려집니다.
 
@@ -333,10 +350,10 @@ clumsy --filter "udp and outbound" --jitter on \
 
 | 항목 | 설명 | 기본값 | 범위 |
 |------|------|--------|------|
-| Good(%) | Good 상태에서의 드롭 확률 | 2.0% | 0 ~ 100% |
-| Bad(%) | Bad 상태에서의 드롭 확률 | 80.0% | 0 ~ 100% |
-| G>B(%) | 패킷당 Good→Bad 전환 확률 | 5.0% | 0 ~ 100% |
-| B>G(%) | 패킷당 Bad→Good 전환 확률 | 20.0% | 0 ~ 100% |
+| Good drop (%) (`burstloss-good`) | Good 상태에서의 드롭 확률 | 2.0% | 0 ~ 100% |
+| Bad drop (%) (`burstloss-bad`) | Bad 상태에서의 드롭 확률 | 80.0% | 0 ~ 100% |
+| Good to Bad (%) (`burstloss-gb`) | 패킷당 Good→Bad 전환 확률 | 5.0% | 0 ~ 100% |
+| Bad to Good (%) (`burstloss-bg`) | 패킷당 Bad→Good 전환 확률 | 20.0% | 0 ~ 100% |
 
 **동작 방식**: 매 패킷마다 현재 상태의 드롭 확률로 손실 여부를 결정하고, 전환 확률에 따라 상태를 바꿉니다.
 
@@ -350,8 +367,8 @@ clumsy --filter "udp and outbound" --jitter on \
 
 ```
 예시: 기본값으로 사용 시
-  → 정상 구간:  패킷 20개마다 평균 1개만 손실 (2%)
-  → 버스트 구간: 패킷 5개 중 4개 손실 (80%), 5개 패킷 동안 지속
+  → 정상 구간:  패킷 50개 중 평균 1개만 손실 (2%), 평균 20개 패킷 동안 지속
+  → 버스트 구간: 패킷 5개 중 4개 손실 (80%), 평균 5개 패킷 동안 지속
   → Drop 모듈과 달리 손실이 "몰려서" 발생
 ```
 
@@ -365,11 +382,11 @@ clumsy --filter "udp and outbound" --jitter on \
 
 | 항목 | 설명 | 기본값 | 범위 |
 |------|------|--------|------|
-| Dur(ms) | 연결 두절 지속 시간 | 3000ms | 100 ~ 60000ms |
-| Gap(ms) | 두절 사이의 정상 간격 | 15000ms | 1000 ~ 300000ms |
-| Trigger 버튼 | 즉시 두절 시작 / 취소 | — | 클릭 |
+| Duration (ms) (`blackout-duration`) | 연결 두절 지속 시간 | 3000ms | 100 ~ 60000ms |
+| Gap (ms) (`blackout-gap`) | 두절 사이의 정상 간격 | 15000ms | 1000 ~ 300000ms |
+| Trigger now 버튼 (`blackout-trigger`) | 즉시 두절 시작 / 취소 | — | 클릭 (일회성 동작) |
 
-**동작 방식**: 활성화 후 Gap(ms)가 지나면 Dur(ms) 동안 모든 패킷을 드롭합니다. 이 사이클이 반복됩니다.
+**동작 방식**: 활성화 후 Gap이 지나면 Duration 동안 모든 패킷을 드롭합니다. 이 사이클이 반복됩니다.
 
 ```
 타임라인 예시 (Gap=15000, Dur=3000):
@@ -380,6 +397,10 @@ clumsy --filter "udp and outbound" --jitter on \
 **Trigger 버튼**:
 - 정상 구간 중 클릭 → 즉시 두절 시작 (주기 리셋)
 - 두절 중 클릭 → 즉시 정상 복구 (두절 취소)
+- CLI는 `--blackout-trigger on`, API·시나리오는 `"blackout-trigger": true`입니다.
+- 트리거는 **Blackout이 이미 켜져 있고 캡처가 돌고 있을 때만** 듣습니다. 꺼진 상태에서 보낸 트리거는
+  무시되고, 모듈을 켜는 것과 같은 요청(같은 시나리오 스텝)에 넣은 트리거도 모듈이 시작되면서 지워집니다.
+  먼저 켜 두고 나중에 트리거하세요.
 
 **언제 사용**: 클라이언트 재접속 로직, 연결 타임아웃 처리, 세션 복구 코드 테스트. Throttle(일시 억제)과 달리 보류 없이 즉각 드롭합니다.
 
@@ -393,13 +414,13 @@ clumsy --filter "udp and outbound" --jitter on \
 
 | 항목 | 설명 | 기본값 | 범위 |
 |------|------|--------|------|
-| Timeframe(ms) | 억제 지속 시간 | 30ms | 0 ~ 1000ms |
-| Chance(%) | 억제 시작 확률 | 10.0% | 0 ~ 100% |
-| Drop Throttled | 억제된 패킷을 버릴지 여부 | OFF | ON/OFF |
+| Timeframe (ms) (`throttle-frame`) | 억제 지속 시간 | 30ms | 0 ~ 1000ms |
+| Chance (%) (`throttle-chance`) | 억제 시작 확률 | 10.0% | 0 ~ 100% |
+| Drop throttled (`throttle-drop`) | 억제된 패킷을 버릴지 여부 | OFF | ON/OFF |
 
-**동작 방식**: 억제가 시작되면 해당 시간 동안 패킷을 버퍼에 쌓습니다.
-- `Drop Throttled OFF`: 시간이 지나면 쌓인 패킷을 한꺼번에 전송 → 순간적인 패킷 폭발(burst) 발생
-- `Drop Throttled ON`: 시간이 지나면 쌓인 패킷 모두 버림 → 짧은 완전 연결 두절
+**동작 방식**: 억제가 시작되면 해당 시간 동안 패킷을 버퍼에 쌓습니다(최대 1000개, 가득 차면 시간 전이라도 끝냅니다).
+- `Drop throttled OFF`: 시간이 지나면 쌓인 패킷을 한꺼번에 전송 → 순간적인 패킷 폭발(burst) 발생
+- `Drop throttled ON`: 시간이 지나면 쌓인 패킷 모두 버림 → 짧은 완전 연결 두절
 
 **언제 사용**: 네트워크가 주기적으로 끊기거나 폭발적으로 패킷이 몰리는 상황 재현.
 
@@ -411,10 +432,10 @@ clumsy --filter "udp and outbound" --jitter on \
 
 | 항목 | 설명 | 기본값 | 범위 |
 |------|------|--------|------|
-| Count | 복제 개수(원본 포함) | 2 | 2 ~ 50 |
-| Chance(%) | 복제 적용 확률 | 10.0% | 0 ~ 100% |
+| Copies (`duplicate-count`) | 복제 개수(원본 포함) | 2 | 2 ~ 50 |
+| Chance (%) (`duplicate-chance`) | 복제 적용 확률 | 10.0% | 0 ~ 100% |
 
-**동작 방식**: 확률에 걸린 패킷을 Count개 복사해서 연속 전송합니다. Count=2면 원본 1개 + 복사본 1개 = 총 2개 전송.
+**동작 방식**: 확률에 걸린 패킷을 Copies개가 되도록 복사해서 연속 전송합니다. Copies=2면 원본 1개 + 복사본 1개 = 총 2개 전송.
 
 **언제 사용**: 중복 패킷 처리 로직 테스트. 특히 UDP 게임에서 같은 패킷이 두 번 오는 상황 검증.
 
@@ -426,13 +447,13 @@ clumsy --filter "udp and outbound" --jitter on \
 
 | 항목 | 설명 | 기본값 | 범위 |
 |------|------|--------|------|
-| Chance(%) | 버퍼에 포획할 확률 | 10.0% | 0 ~ 100% |
-| Buf | 최대 보류 패킷 수 | 5 | 2 ~ 50 |
-| Delay(ms) | 최대 보류 시간 | 200ms | 10 ~ 2000ms |
+| Chance (%) (`ood-chance`) | 버퍼에 포획할 확률 | 10.0% | 0 ~ 100% |
+| Buffer (`ood-buffer`) | 최대 보류 패킷 수 | 5 | 2 ~ 50 |
+| Delay (ms) (`ood-delay`) | 최대 보류 시간 | 200ms | 10 ~ 2000ms |
 
-**동작 방식**: 확률에 걸린 패킷을 내부 버퍼(최대 Buf개)에 쌓습니다. 버퍼가 가득 차거나 가장 오래된 패킷이 Delay(ms)를 초과하면 버퍼 내 모든 패킷을 Fisher-Yates 셔플로 무작위 순서로 방출합니다. 실제 네트워크의 비순서 도착을 현실적으로 재현합니다.
+**동작 방식**: 확률에 걸린 패킷을 내부 버퍼(최대 Buffer개)에 쌓습니다. 버퍼가 가득 차거나 가장 오래된 패킷이 Delay를 초과하면 버퍼 내 모든 패킷을 Fisher-Yates 셔플로 무작위 순서로 방출합니다. 실제 네트워크의 비순서 도착을 현실적으로 재현합니다.
 
-**언제 사용**: 패킷이 순서 없이 도착하는 상황 테스트. UDP 기반 게임의 시퀀스 번호 처리, 패킷 재조립 로직 검증. Buf와 Delay를 크게 설정할수록 더 심각한 순서 뒤섞임을 만들 수 있습니다.
+**언제 사용**: 패킷이 순서 없이 도착하는 상황 테스트. UDP 기반 게임의 시퀀스 번호 처리, 패킷 재조립 로직 검증. Buffer와 Delay를 크게 설정할수록 더 심각한 순서 뒤섞임을 만들 수 있습니다.
 
 > **Jitter와의 차이**: Jitter는 각 패킷에 다른 지연을 줘서 자연스럽게 순서가 뒤섞립니다. Out of Order는 여러 패킷을 모아 셔플 후 한꺼번에 방출합니다.
 
@@ -444,20 +465,21 @@ clumsy --filter "udp and outbound" --jitter on \
 
 | 항목 | 설명 | 기본값 | 선택지 |
 |------|------|--------|--------|
-| Chance(%) | 변조 확률 | 10.0% | 0 ~ 100% |
-| Redo Checksum | 변조 후 체크섬 재계산 | ON | ON/OFF |
-| Position | 변조할 페이로드 위치 | Center | Front / Center / Back / Random |
+| Chance (%) (`tamper-chance`) | 변조 확률 | 10.0% | 0 ~ 100% |
+| Redo checksum (`tamper-checksum`) | 변조 후 체크섬 재계산 | ON | ON/OFF |
+| Position (`tamper-position`) | 변조할 페이로드 위치 | 1 (Center) | 0=Front / 1=Center / 2=Back / 3=Random |
 
 **동작 방식**: 페이로드의 1/4 크기 구간을 XOR 패턴으로 덮어씁니다. 어느 부분을 건드릴지는 Position으로 결정합니다.
+Position은 숫자로 입력합니다(대시보드도 숫자 입력란입니다).
 
 | Position | 설명 |
 |----------|------|
-| Front | 페이로드 앞쪽 1/4 — 게임 패킷 헤더·시퀀스 번호 영역 타격 |
-| Center | 페이로드 중간 1/4 (기본값) — 일반적인 데이터 영역 |
-| Back | 페이로드 뒤쪽 1/4 — 체크섬·푸터가 여기 있는 프로토콜에 유효 |
-| Random | 매 패킷마다 오프셋을 랜덤 선택 — 예측 불가한 손상 재현 |
+| 0 = Front | 페이로드 앞쪽 1/4 — 게임 패킷 헤더·시퀀스 번호 영역 타격 |
+| 1 = Center | 페이로드 중간 1/4 (기본값) — 일반적인 데이터 영역 |
+| 2 = Back | 페이로드 뒤쪽 1/4 — 체크섬·푸터가 여기 있는 프로토콜에 유효 |
+| 3 = Random | 매 패킷마다 오프셋을 랜덤 선택 — 예측 불가한 손상 재현 |
 
-`Redo Checksum`이 켜져 있으면 변조 후 IP/TCP/UDP 체크섬을 재계산해서 수신 측이 체크섬 오류로 즉시 거부하지 않게 합니다. 체크섬 무결성을 유지한 채로 페이로드만 손상된 상황을 테스트할 때 사용합니다.
+`Redo checksum`이 켜져 있으면 변조 후 IP/TCP/UDP 체크섬을 재계산해서 수신 측이 체크섬 오류로 즉시 거부하지 않게 합니다. 체크섬 무결성을 유지한 채로 페이로드만 손상된 상황을 테스트할 때 사용합니다.
 
 4바이트 이하의 짧은 패킷은 Position 설정과 무관하게 페이로드 전체를 변조합니다.
 
@@ -471,9 +493,9 @@ clumsy --filter "udp and outbound" --jitter on \
 
 | 항목 | 설명 | 기본값 | 범위 |
 |------|------|--------|------|
-| Chance(%) | 이 패킷을 손상시킬 확률 | 10% | 0 ~ 100% |
-| Bit error (ppm) | **비트당** 뒤집힘 확률(백만분율) | 100 | 0 ~ 1,000,000 |
-| Redo checksum | 손상 후 체크섬 재계산 | 켬 | 켬/끔 |
+| Chance (%) (`corrupt-chance`) | 이 패킷을 손상시킬 확률 | 10% | 0 ~ 100% |
+| Bit error (ppm) (`corrupt-ber`) | **비트당** 뒤집힘 확률(백만분율) | 100 | 0 ~ 1,000,000 |
+| Redo checksum (`corrupt-checksum`) | 손상 후 체크섬 재계산 | 켬 | 켬/끔 |
 | Inbound / Outbound | 적용 방향 | 둘 다 | — |
 
 **Tamper와 무엇이 다른가**: Tamper는 페이로드의 한 구간을 XOR 패턴으로 통째로
@@ -515,12 +537,15 @@ TCP 패킷에 RST 플래그를 설정해서 연결을 강제로 끊습니다.
 
 | 항목 | 설명 | 기본값 | 범위 |
 |------|------|--------|------|
-| Chance(%) | RST 주입 확률 | 0% | 0 ~ 100% |
-| RST next packet 버튼 | 다음 패킷에 즉시 RST 주입 | — | 버튼 클릭 |
+| Chance (%) (`reset-chance`) | RST 주입 확률 | 0% | 0 ~ 100% |
+| RST next packet 버튼 (`reset-next`) | 다음 패킷에 즉시 RST 주입 | — | 버튼 클릭 (일회성 동작) |
 
 **동작 방식**: TCP 패킷의 헤더에 RST 비트를 설정합니다. 수신 측은 연결이 비정상 종료된 것으로 처리합니다.
+기본 Chance가 0%이므로, 켜기만 하면 `RST next packet`을 누르기 전까지는 아무 일도 일어나지 않습니다.
 
 **언제 사용**: TCP 연결 강제 종료 시 클라이언트/서버의 재연결 처리 테스트. `RST next packet` 버튼으로 원하는 시점에 즉시 연결을 끊을 수 있습니다.
+CLI는 `--reset-next on`, API·시나리오는 `"reset-next": true`입니다. Blackout의 트리거와 마찬가지로
+모듈이 이미 켜져 있고 캡처가 돌고 있을 때만 듣습니다.
 
 > **주의**: UDP에는 효과가 없습니다. TCP 연결에만 동작합니다.
 
@@ -528,29 +553,30 @@ TCP 패킷에 RST 플래그를 설정해서 연결을 강제로 끊습니다.
 
 ### Bandwidth — 대역폭 제한
 
-> **초기 버스트 허용량**: 토큰 버킷은 `max(64KB, 제한값×2초)` 크기로 **가득 찬 상태에서
+> **초기 버스트 허용량**: 토큰 버킷은 `max(65535바이트, 제한값×2초)` 크기로 **가득 찬 상태에서
 > 시작**합니다. 따라서 낮은 제한값(예: 1KB/s)을 걸어도 **처음 약 64KB는 즉시 통과**하고
-> 그 이후부터 제한이 걸립니다. 64KB 하한이 있는 이유는 최대 크기 패킷(65535B) 하나가
+> 그 이후부터 제한이 걸립니다. 65535바이트 하한이 있는 이유는 최대 크기 패킷(65535B) 하나가
 > 낮은 제한값에서 영원히 나가지 못하는 상황을 막기 위해서입니다.
 > 짧은 테스트에서 "제한이 안 걸린다"고 보이면 전송량이 버킷보다 작은 것입니다.
+> 이 버스트는 제한값이 0보다 클 때만 해당합니다. `Limit=0`이면 처음부터 아무것도 나가지 않습니다.
 
 초당 전송량(KB/s)을 제한합니다. 한도를 초과하는 패킷은 **큐에 쌓아 지연 전송**합니다.
 
 | 항목 | 설명 | 기본값 | 범위 |
 |------|------|--------|------|
-| Limit(KB/s) | 대역폭 상한 | 10 KB/s | 0 ~ 99999 KB/s |
+| Limit (KB/s) (`bandwidth-bandwidth`) | 대역폭 상한 (1KB = 1024바이트) | 10 KB/s | 0 ~ 99999 KB/s |
 
 **동작 방식 (토큰 버킷 알고리즘)**:
 
 ```
-토큰 = Limit KB/s 속도로 매 스텝 충전 (최대 2초치 저장)
+토큰 = Limit KB/s 속도로 매 스텝 충전 (최대 2초치 저장, 최소 65535바이트)
 패킷 전송 시 → 패킷 크기만큼 토큰 소비
 토큰 부족 시 → 큐에 보관, 토큰이 충전되면 순서대로 전송
 큐가 가득 찼을 때(2000개) → 초과 패킷 드롭 (최후 수단)
 ```
 
 - `Limit=500` → 초당 500KB 속도로 큐에서 순서대로 방출, 초과 트래픽은 지연됨
-- `Limit=0` → 토큰 충전 없음 = 모든 패킷 큐에 쌓이다가 결국 드롭 (완전 차단)
+- `Limit=0` → 큐에서 내보내는 단계 자체가 실행되지 않음 = 처음부터 한 패킷도 나가지 않고 큐에 쌓이다가 2000개를 넘으면 드롭 (완전 차단). 위의 초기 버스트는 `Limit`이 0보다 클 때만 해당합니다
 - 모듈 비활성화 시 → 큐에 쌓인 패킷 즉시 전부 방출 (손실 없음)
 
 **언제 사용**: 저속 모바일 데이터, 혼잡한 네트워크 환경 재현. 패킷을 버리는 대신 지연을 발생시키므로 TCP 흐름 제어, 재전송 메커니즘 테스트에 더 적합합니다.
@@ -580,7 +606,7 @@ TCP 패킷에 RST 플래그를 설정해서 연결을 강제로 끊습니다.
 | `Sent` | 총 전송(재주입) 패킷 수 |
 | `Packets / sec` | 초당 캡처 속도 |
 | `Elapsed` | 캡처 경과 시간 |
-| `Buffers` | Lag / Jitter / Bandwidth 모듈의 현재 내부 버퍼 크기 |
+| `Buffers (lag/jit/bw)` | Lag / Jitter / Bandwidth 모듈의 현재 내부 버퍼 크기 |
 | `Delay p50 / p95 / p99` | Lag·Jitter가 실제로 지연시킨 시간의 분위수 |
 | `Delay max` | 관측된 최대 지연 |
 | `Delayed packets` | 지연 히스토그램에 기록된 패킷 수 |
@@ -650,12 +676,12 @@ clumsy.exe --filter "..." --stats-log stats.csv --stats-interval 1
 #### CSV 형식
 
 ```csv
-elapsed_sec,captured,sent,pps,lag,jitter,drop,burstloss,blackout,throttle,duplicate,ood,tamper,reset,bandwidth,lag_buf,jitter_buf,bw_buf,bw_limit_kbps
-1.0,156,150,156,50,0,6,0,0,0,0,0,0,0,150,3,0,2,100
-2.0,312,298,156,100,0,14,0,0,0,0,0,0,0,298,5,0,1,100
+elapsed_sec,captured,sent,pps,lag,jitter,drop,burstloss,blackout,throttle,duplicate,ood,tamper,corrupt,reset,bandwidth,lag_buf,jitter_buf,bw_buf,bw_limit_kbps
+1.0,156,150,156,50,0,6,0,0,0,0,0,0,0,0,150,3,0,2,100
+2.0,312,298,156,100,0,14,0,0,0,0,0,0,0,0,298,5,0,1,100
 ```
 
-- 첫 행: 헤더 (모듈 이름은 `shortName` 기준)
+- 첫 행: 헤더 (모듈 이름은 `shortName` 기준, 모듈 처리 순서와 같음)
 - `elapsed_sec`: 필터링 시작 후 경과 시간 (초)
 - `pps`: 해당 구간 초당 캡처 패킷 수
 - 모듈 열: 누적 처리 패킷 수 (`affectedCount`)
@@ -672,6 +698,7 @@ elapsed_sec,captured,sent,pps,lag,jitter,drop,burstloss,blackout,throttle,duplic
 ```
 
 > 필터링을 정지(Stop)하거나 프로그램이 종료되면 파일이 자동으로 닫힙니다.
+> 기록은 캡처가 시작될 때마다 새로 시작하며, 같은 경로의 기존 파일을 덮어씁니다.
 
 ---
 
@@ -691,7 +718,7 @@ clumsy.exe --filter "필터식" --모듈명 on [--모듈명-옵션 값] ...
 ### 전체 인수 목록
 
 ```
---filter "식"          WinDivert 필터 (필수)
+--filter "식"          WinDivert 필터. 주면 즉시 캡처 시작, 없으면 대시보드/API로 필터가 올 때까지 대기
 --timeout <초>         지정 초 후 자동 종료
 --scenario <파일>      시나리오 JSON 파일 로드 (필터링 시작과 동시에 재생)
 --profile <이름>       profiles.json에서 프로파일 불러와 적용
@@ -725,27 +752,36 @@ clumsy.exe --filter "필터식" --모듈명 on [--모듈명-옵션 값] ...
 --blackout on/off
 --blackout-duration <ms>   두절 지속 시간 (기본: 3000)
 --blackout-gap <ms>        두절 사이 정상 간격 (기본: 15000)
+--blackout-trigger on      즉시 두절 시작/취소 (일회성 동작)
 --blackout-inbound on/off
 --blackout-outbound on/off
 
 --throttle on/off
---throttle-chance <%>
+--throttle-chance <%>  억제 시작 확률 (기본: 10.0)
 --throttle-frame <ms>  억제 지속 시간 (기본: 30)
+--throttle-drop on/off 억제된 패킷을 버림 (기본: off)
 --throttle-inbound on/off
 --throttle-outbound on/off
 
 --duplicate on/off
---duplicate-chance <%>
---duplicate-count <n>  복제 개수 (기본: 2)
+--duplicate-chance <%> 복제 적용 확률 (기본: 10.0)
+--duplicate-count <n>  복제 개수, 원본 포함 (기본: 2, 범위: 2~50)
 --duplicate-inbound on/off
 --duplicate-outbound on/off
 
 --ood on/off
---ood-chance <%>
+--ood-chance <%>       버퍼에 포획할 확률 (기본: 10.0)
 --ood-buffer <n>       최대 보류 패킷 수 (기본: 5, 범위: 2~50)
 --ood-delay <ms>       최대 보류 시간 ms (기본: 200, 범위: 10~2000)
 --ood-inbound on/off
 --ood-outbound on/off
+
+--tamper on/off
+--tamper-chance <%>       변조 확률 (기본: 10.0)
+--tamper-position <0~3>   변조 위치: 0=Front, 1=Center(기본), 2=Back, 3=Random
+--tamper-checksum on/off  변조 후 체크섬 재계산 (기본: on)
+--tamper-inbound on/off
+--tamper-outbound on/off
 
 --corrupt on/off
 --corrupt-chance <%>      이 패킷을 손상시킬 확률 (기본: 10)
@@ -754,15 +790,9 @@ clumsy.exe --filter "필터식" --모듈명 on [--모듈명-옵션 값] ...
 --corrupt-inbound on/off
 --corrupt-outbound on/off
 
---tamper on/off
---tamper-chance <%>
---tamper-position <1~4>   변조 위치: 1=Front, 2=Center(기본), 3=Back, 4=Random
---tamper-checksum on/off
---tamper-inbound on/off
---tamper-outbound on/off
-
 --reset on/off
 --reset-chance <%>     RST 주입 확률 (기본: 0)
+--reset-next on        다음 TCP 패킷에 RST 주입 (일회성 동작)
 --reset-inbound on/off
 --reset-outbound on/off
 
@@ -795,7 +825,34 @@ clumsy.exe --filter "필터식" --모듈명 on [--모듈명-옵션 값] ...
 --verbose on/off       패킷 단위 트레이스 로그 (Debug 기본 on, Release 기본 off)
 --elevate on           관리자 권한이 아니면 UAC로 자기 자신을 재실행
 --help                 인수 목록 출력 후 종료
+--version              버전 출력 후 종료
 ```
+
+확률은 비율이 아니라 백분율입니다: `--drop-chance 5`는 5%입니다.
+리눅스 빌드에는 `--queue-num`, `--inject-mark`, `--auto-iptables`가 더 있습니다([docs/LINUX.md](docs/LINUX.md) 참조).
+
+### 인수 검증과 종료 코드
+
+명령줄은 아무것도 시작하기 전에 통째로 검사합니다. 스크립트나 AI 에이전트(LLM)가
+틀린 옵션을 넘기고도 "성공"으로 오해하는 일을 막기 위한 것입니다.
+
+- **모르는 옵션**(`--lag-ms`, `--delay` 등)은 오류입니다. 메시지가 올바른 이름을 제안합니다
+  (예: `clumsy: unknown option --delay - clumsy spells that --lag on --lag-time <ms>`).
+- **쓸 수 없는 값**(숫자 자리에 문자, 없는 분포 이름, `on`/`off`가 아닌 스위치 값)도 오류입니다.
+- **범위를 벗어난 숫자**는 예전처럼 범위 안으로 조정하되, 경고와 실제 적용값을 출력합니다
+  (예: `clumsy: warning: --lag-time: 99999 is outside 0..15000, clamped to 15000`).
+- 스위치 값은 대소문자를 가리지 않습니다 (`on`/`off`, `true`/`false`, `yes`/`no`, `1`/`0`).
+- `--filter`를 줬는데 캡처를 시작하지 못하면(관리자 권한 없음, 필터 문법 오류) 대기하지 않고 즉시 종료합니다.
+  필터 없이 실행한 경우에는 예전처럼 대시보드를 띄운 채 대기합니다.
+
+| 종료 코드 | 의미 |
+|-----------|------|
+| `0` | 정상 종료 (`--timeout` 도달, Ctrl+C, `POST /api/quit`) |
+| `2` | 명령줄 오류: 모르는 옵션, 쓸 수 없는 값, 불러올 수 없는 `--profile` / `--scenario` |
+| `3` | 캡처(`--filter`)나 재생(`--replay-in`)을 시작하지 못함 (대기하지 않고 즉시 종료) |
+| `4` | 다른 clumsy가 이미 실행 중 (새로 실행한 쪽만 종료하고 기존 인스턴스는 그대로) |
+
+`--help`의 모듈 목록은 코드의 ParamSpec에서 자동 생성되므로, 위 목록과 다르면 `--help`가 맞습니다.
 
 > 참고: `--tamper-position`은 `0=Front, 1=Center(기본), 2=Back, 3=Random`입니다.
 > (0.3까지의 UI 드롭다운은 1부터 시작했지만, API/CLI 값은 0부터입니다.)
@@ -838,7 +895,7 @@ clumsy.exe --web-bind 0.0.0.0 --web-port 8080 --web-token ci-secret-token
 
 ### config.json (권장 형식)
 
-`etc/config.json`을 편집기로 열어 자주 쓰는 필터를 추가할 수 있습니다.
+`clumsy.exe`와 같은 폴더의 `config.json`(저장소 원본은 `etc/config.json`)을 편집기로 열어 자주 쓰는 필터를 추가할 수 있습니다.
 
 ```json
 {
@@ -865,7 +922,9 @@ local server test: udp and outbound and loopback
 
 > **우선순위**: `config.json` → `config.txt` → 기본 루프백 필터. 두 파일이 모두 있으면 `config.json`만 사용됩니다.
 
-저장 후 clumsy를 재시작하면 Presets 드롭다운에 나타납니다.
+저장 후 clumsy를 재시작하면 Preset 드롭다운에 나타납니다. 대시보드의 **Save as preset...**이나
+`POST /api/presets`로 저장한 프리셋은 `config.json`에 기록되고 재시작 없이 바로 나타납니다.
+최대 64개까지 읽습니다.
 
 ### 기본 제공 게임 엔진/서비스 프리셋
 
@@ -923,6 +982,8 @@ clumsy는 두 가지 제어 트랜스포트를 동시에 제공합니다.
 
 두 트랜스포트는 내부적으로 **동일한 제어 계층**(`controlapi.cpp`)을 호출하므로
 동작이 갈라지지 않습니다. 기존 Named Pipe 스크립트는 수정 없이 그대로 동작합니다.
+리눅스에서는 Named Pipe 대신 Unix 도메인 소켓(`/run/clumsy.sock`, 안 되면 `/tmp/clumsy.sock`)이
+같은 JSON 명령을 받습니다.
 
 ---
 
@@ -930,10 +991,12 @@ clumsy는 두 가지 제어 트랜스포트를 동시에 제공합니다.
 
 인증은 바인딩 주소에 따라 결정됩니다:
 
-- **로컬호스트 바인딩(기본)**: 토큰 불필요
+- **로컬호스트 바인딩(기본)**: 토큰 불필요. 단 `--web-token`을 주면 로컬호스트에서도 토큰이 필요합니다.
 - **`--web-bind`로 외부 바인딩**: 토큰 **필수**.
-  `--web-token`으로 직접 지정하거나, 생략하면 시작 시 자동 생성되어 콘솔 배너에 출력됩니다.
+  `--web-token`으로 직접 지정하거나, 생략하면 시작 시 자동 생성되어 콘솔 배너의 대시보드 주소(`?token=...`)에 붙어 출력됩니다.
   전달 방법은 `X-Clumsy-Token` 헤더 또는 `?token=` 쿼리스트링입니다.
+- 토큰이 켜져 있으면 대시보드 페이지와 `llms.txt`를 포함해 `GET /api/health`, `GET /metrics`를 뺀 모든 경로에 필요합니다.
+  틀리거나 없으면 `401`과 `{"status":"error","message":"missing or invalid token; ..."}`가 돌아옵니다.
 
 #### 엔드포인트 목록
 
@@ -948,8 +1011,10 @@ clumsy는 두 가지 제어 트랜스포트를 동시에 제공합니다.
 | `GET /api/presets` | 필요 | `config.json`의 필터 프리셋 목록 |
 | `GET /api/profiles` | 필요 | `profiles.json`의 프로파일 이름 목록 |
 | `GET /api/report` | 필요 | HTML 세션 리포트 다운로드 |
-| `GET /api/docs` | 필요 | 엔드포인트 목록(JSON) |
-| `POST /api/filter` | 필요 | 필터 설정 후 캡처 시작 |
+| `GET /api/docs` | 필요 | 엔드포인트 목록(JSON). 엔드포인트별 설명·예시 본문·API 규칙 포함 |
+| `GET /llms.txt` | 필요 | AI 에이전트(LLM)용 사용 가이드 (일반 텍스트, `web/llms.txt`) |
+| `GET /llms_kr.txt` | 필요 | 같은 가이드의 한국어판 (`web/llms_kr.txt`) |
+| `POST /api/filter` | 필요 | 필터 설정 후 캡처 시작 (캡처 중이면 새 필터로 재시작) |
 | `POST /api/stop` | 필요 | 캡처 중지 |
 | `POST /api/quit` | 필요 | clumsy 종료 |
 | `POST /api/modules/{shortName}` | 필요 | 모듈 활성화/파라미터 변경 |
@@ -963,6 +1028,47 @@ clumsy는 두 가지 제어 트랜스포트를 동시에 제공합니다.
 | `POST /api/scenario/start` \| `stop` | 필요 | 시나리오 재생 제어 |
 | `POST /api/pcap/start` \| `stop` | 필요 | pcap 덤프 제어 |
 | `POST /api/replay/start` \| `stop` | 필요 | pcap 재생 제어 |
+
+#### 응답 규칙
+
+모든 `/api` 응답은 `"status"`가 `"ok"` 또는 `"error"`(+`"message"`)인 JSON입니다. 없는 경로나
+틀린 메서드도 JSON 오류(`404`, `405`)로 답하며, 무엇을 써야 하는지 알려줍니다. 메서드는 GET과 POST뿐이고
+POST 본문은 JSON 객체입니다.
+
+```
+GET /api/stop
+{"status":"error","message":"no GET endpoint at /api/stop. Actions (filter, stop, quit, modules/{name}, apply, ...) are POST. GET /api/docs lists every endpoint with an example body."}
+```
+
+설정 요청(`POST /api/modules/{shortName}`, `POST /api/apply`)은 `ok`여도 요청 그대로
+적용되지 않았을 수 있으므로 다음 필드를 확인하세요.
+
+| 필드 | 의미 |
+|------|------|
+| `warnings` | 범위를 벗어나 조정된 값, 또는 쓸 수 없어 적용하지 않은 값(`- not applied`)의 설명 |
+| `unknownKeys` / `validKeys` | 해당 모듈에 없는 키와, 그 모듈이 받는 키 목록 (`validKeys`는 `POST /api/modules/{shortName}`에만) |
+| `params` | 요청 처리 후 실제로 적용되어 있는 값 (`/api/apply`는 받아들인 키만) |
+| `capturing` | `false`면 설정은 저장됐지만 캡처가 없어 아직 트래픽에 작용하지 않는 상태 |
+
+요청한 키가 **하나도 적용되지 않으면**(전부 모르는 키이거나 쓸 수 없는 값) `400` 오류로 답합니다.
+`ok`에 `applied: 0`이면 상태만 확인하는 스크립트가 성공으로 오해하기 때문입니다.
+
+`POST /api/scenario/loadinline`의 `scenario`는 JSON 배열 그대로 보내도 되고(권장), 예전처럼
+배열을 문자열로 감싸 보내도 됩니다.
+
+`POST /api/scenario/start`를 캡처 없이 부르면 `ok`와 함께 "캡처가 없어 어떤 스텝도 실행되지 않는다"는
+`warnings`가 붙습니다. 스텝 시간은 캡처 시작 시점부터 재기 때문입니다.
+
+```
+POST /api/modules/lag  {"lag-time":99999,"lag-ms":5}
+{"status":"ok","module":"lag","applied":1,"enabled":false,"capturing":false,
+ "params":{"lag-time":"15000","lag-inbound":"true","lag-outbound":"true"},
+ "unknownKeys":"lag-ms","validKeys":"lag-inbound,lag-outbound,lag-time",
+ "warnings":["lag-time: 99999 is outside 0..15000, clamped to 15000"]}
+```
+
+시나리오 로드(`POST /api/scenario/load`, `loadinline`)도 모르는 키·잘못된 값·없는 메트릭을
+`warnings`로 알려줍니다. 예전에는 해당 스텝이 실행되는 시점에 콘솔에만 표시되었습니다.
 
 #### 사용 예 (curl)
 
@@ -1032,7 +1138,11 @@ scrape_configs:
 | `clumsy_capture_elapsed_seconds` | gauge | 캡처 경과 시간 |
 | `clumsy_lag_buffer_packets` 등 | gauge | 모듈별 내부 버퍼 크기 |
 | `clumsy_pcap_written_packets_total` | counter | pcap에 기록한 패킷 수 |
+| `clumsy_pcap_written_bytes_total` | counter | pcap에 기록한 바이트 수 |
+| `clumsy_replay_active` | gauge | pcap 재생 중이면 1 |
 | `clumsy_replay_injected_packets_total` | counter | 재생으로 주입한 패킷 수 |
+| `clumsy_replay_failed_packets_total` | counter | 재생 중 주입하지 못한 패킷 수 |
+| `clumsy_corrupt_flipped_bits_total` | counter | Corrupt 모듈이 뒤집은 누적 비트 수 |
 | `clumsy_module_enabled{module="..."}` | gauge | 모듈 on/off |
 | `clumsy_module_affected_packets_total{module="..."}` | counter | 모듈이 처리한 패킷 수 |
 | `clumsy_latency_ms` | histogram | 지연 분포 (`_bucket`/`_sum`/`_count`) |
@@ -1071,6 +1181,7 @@ with requests.get("http://127.0.0.1:8080/api/stream", stream=True) as r:
 {
   "shortName": "drop",
   "displayName": "Drop",
+  "description": "random packet loss, evenly spread",
   "enabled": true,
   "affected": 132,
   "params": { "drop-chance": "10.0", "drop-inbound": "true", "drop-outbound": "true" },
@@ -1113,7 +1224,7 @@ clumsy는 시작 시 자동으로 Named Pipe 서버(`\\.\pipe\clumsy`)를 열어
 {"cmd":"set","module":"모듈명","enabled":true,"파라미터키":값}
 ```
 
-`module`은 모듈의 shortName (lag, jitter, drop, burstloss, blackout, throttle, ood, duplicate, tamper, reset, bandwidth).
+`module`은 모듈의 shortName (lag, jitter, drop, burstloss, blackout, throttle, duplicate, ood, tamper, corrupt, reset, bandwidth).
 
 `enabled` 필드가 있으면 모듈을 켜거나 끕니다. 그 외 필드는 해당 모듈의 파라미터로 적용됩니다.
 
@@ -1135,27 +1246,39 @@ clumsy는 시작 시 자동으로 Named Pipe 서버(`\\.\pipe\clumsy`)를 열어
 |------|------------|------|------|
 | lag | lag-time | 정수(ms) | 0~15000 |
 | jitter | jitter-min, jitter-max | 정수(ms) | 0~5000 |
+| jitter | jitter-dist | 이름 | uniform / normal / pareto |
 | drop | drop-chance | 실수(%) | 0.0~100.0 |
 | burstloss | burstloss-good, burstloss-bad, burstloss-gb, burstloss-bg | 실수(%) | 0.0~100.0 |
 | blackout | blackout-duration | 정수(ms) | 100~60000 |
 | blackout | blackout-gap | 정수(ms) | 1000~300000 |
-| blackout | blackout-trigger | true/false | — |
+| blackout | blackout-trigger | true (일회성 동작) | — |
 | throttle | throttle-chance | 실수(%) | 0.0~100.0 |
 | throttle | throttle-frame | 정수(ms) | 0~1000 |
+| throttle | throttle-drop | true/false | — |
+| duplicate | duplicate-chance | 실수(%) | 0.0~100.0 |
+| duplicate | duplicate-count | 정수 | 2~50 |
 | ood | ood-chance | 실수(%) | 0.0~100.0 |
 | ood | ood-buffer | 정수 | 2~50 |
 | ood | ood-delay | 정수(ms) | 10~2000 |
-| duplicate | duplicate-chance | 실수(%) | 0.0~100.0 |
-| duplicate | duplicate-count | 정수 | 2~50 |
 | tamper | tamper-chance | 실수(%) | 0.0~100.0 |
 | tamper | tamper-position | 정수 | 0=Front,1=Center,2=Back,3=Random |
+| tamper | tamper-checksum | true/false | — |
+| corrupt | corrupt-chance | 실수(%) | 0.0~100.0 |
+| corrupt | corrupt-ber | 정수(ppm) | 0~1000000 |
+| corrupt | corrupt-checksum | true/false | — |
 | reset | reset-chance | 실수(%) | 0.0~100.0 |
+| reset | reset-next | true (일회성 동작) | — |
 | bandwidth | bandwidth-bandwidth | 정수(KB/s) | 0~99999 |
+| (모든 모듈) | `<모듈>-inbound`, `<모듈>-outbound` | true/false | — |
 
 **응답**:
 ```json
 {"status":"ok","module":"lag"}
 ```
+
+요청이 문제없으면 0.3과 똑같은 응답입니다. 모르는 키나 범위를 벗어나 조정된 값이 있을 때만
+`unknownKeys` / `warnings`가 덧붙습니다:
+`{"status":"ok","module":"lag","unknownKeys":"lag-ms","warnings":["lag-time: 99999 is outside 0..15000, clamped to 15000"]}`
 
 #### `get_stats` — 현재 상태 조회
 
@@ -1202,7 +1325,7 @@ clumsy는 시작 시 자동으로 Named Pipe 서버(`\\.\pipe\clumsy`)를 열어
 
 | 명령 | 설명 |
 |------|------|
-| `{"cmd":"filter","filter":"udp and outbound","process":"game.exe"}` | 필터 설정 후 캡처 시작 |
+| `{"cmd":"filter","filter":"udp and outbound","process":"game.exe"}` | 필터 설정 후 캡처 시작 (`"cmd":"start"`도 같음) |
 | `{"cmd":"stop_capture"}` | 캡처만 중지 (clumsy는 계속 실행) |
 | `{"cmd":"quit"}` | clumsy 종료 (`stop`과 동일) |
 | `{"cmd":"get_status"}` | 캡처 상태/필터/마지막 메시지 |
@@ -1210,10 +1333,14 @@ clumsy는 시작 시 자동으로 Named Pipe 서버(`\\.\pipe\clumsy`)를 열어
 | `{"cmd":"get_presets"}` | 필터 프리셋 목록 |
 | `{"cmd":"get_profiles"}` | 프로파일 이름 목록 |
 | `{"cmd":"profile","name":"mobile-4g"}` | 프로파일 적용 |
+| `{"cmd":"delete_profile","name":"mobile-4g"}` | 프로파일 삭제 |
+| `{"cmd":"apply","lag":true,"lag-time":200}` | 여러 모듈을 한 번에 설정 (`POST /api/apply`와 같음) |
 | `{"cmd":"scenario","action":"load","path":"s.json"}` | 시나리오 로드 (`action`: load/start/stop) |
 | `{"cmd":"pcap","action":"start","path":"out.pcap"}` | pcap 덤프 제어 (`action`: start/stop) |
 | `{"cmd":"replay","action":"start","path":"in.pcap"}` | pcap 재생 제어 (`action`: start/stop) |
 | `{"cmd":"metrics"}` | Prometheus 노출 텍스트 (JSON 문자열 필드로 감싸서 반환) |
+
+프로파일 저장, 프리셋 저장, 본문 시나리오 로드(`loadinline`)는 REST에만 있습니다.
 
 > **중요**: `stop`은 0.3과 동일하게 **프로그램 종료**를 의미합니다.
 > 캡처만 멈추려면 `stop_capture`를 사용하세요.
@@ -1300,7 +1427,9 @@ Send-ClumsyCommand @{cmd="stop"}
 clumsy.exe --filter "udp and outbound" --scenario scenario.json
 ```
 
-필터링이 시작되면 시나리오가 자동으로 재생됩니다. 모든 스텝이 실행되면 재생이 완료되고 마지막 설정 상태가 유지됩니다.
+필터링이 시작되면 시나리오가 자동으로 재생됩니다(캡처를 다시 시작할 때마다 처음부터). 모든 스텝이 실행되면 재생이 완료되고 마지막 설정 상태가 유지됩니다.
+파일을 읽지 못했거나 쓸 수 있는 스텝이 하나도 없으면 아무것도 시작하지 않고 종료 코드 `2`로 끝납니다.
+읽은 뒤 발견한 문제(모르는 키, 잘못된 값, 없는 메트릭)는 콘솔에 `scenario: WARNING ...`으로 출력됩니다.
 
 #### 웹 대시보드의 시나리오 에디터
 
@@ -1318,13 +1447,17 @@ clumsy.exe --filter "udp and outbound" --scenario scenario.json
 기존 시나리오를 붙여넣어도 되고, 파일로 저장해 `--scenario`에 쓸 수도 있습니다.
 (빌더는 스텝을 바꿀 때만 이 상자를 덮어씁니다.)
 
-REST로는 `POST /api/scenario/loadinline`에 문서를 문자열로 담아 보냅니다:
+REST로는 `POST /api/scenario/loadinline`에 스텝 배열을 그대로 담아 보냅니다
+(배열을 문자열로 감싼 예전 형식도 받습니다):
 
 ```bash
 curl -X POST http://127.0.0.1:8080/api/scenario/loadinline \
      -H "Content-Type: application/json" \
-     -d '{"scenario":"[{\"at\":5,\"lag\":true,\"lag-time\":250}]"}'
+     -d '{"scenario":[{"at":5,"lag":true,"lag-time":250}]}'
 ```
+
+응답의 `steps`는 읽은 스텝 수이고, 문제가 있으면 `warnings`가 붙습니다:
+`{"status":"ok","steps":2,"warnings":["step when=captured: unknown metric, it always reads 0"]}`
 
 ### 파일 형식
 
@@ -1338,8 +1471,9 @@ curl -X POST http://127.0.0.1:8080/api/scenario/loadinline \
 - `"at"`: 필터링 시작 후 몇 초에 적용할지 (정수, 초 단위)
 - `"모듈명": true/false`: 해당 모듈 활성화/비활성화 (모듈 shortName 사용)
 - `"파라미터키": 값`: 모듈 파라미터 변경 (제어 API와 동일한 키 이름)
+- `"_"`로 시작하는 키(`"_comment"` 등)는 주석으로 보고 무시합니다. JSON에는 주석 문법이 없기 때문입니다.
 
-모듈 shortName 목록: `lag`, `jitter`, `drop`, `burstloss`, `blackout`, `throttle`, `ood`, `duplicate`, `tamper`, `corrupt`, `reset`, `bandwidth`
+모듈 shortName 목록: `lag`, `jitter`, `drop`, `burstloss`, `blackout`, `throttle`, `duplicate`, `ood`, `tamper`, `corrupt`, `reset`, `bandwidth`
 
 ### 트리거 종류 (0.4에서 확장)
 
@@ -1460,7 +1594,11 @@ curl -X POST http://127.0.0.1:8080/api/scenario/loadinline \
 ]
 ```
 
-`etc/scenario-example.json`에 위 패턴이 모두 들어간 예제 파일이 들어 있습니다.
+마지막 스텝은 첫 발동에서 Blackout을 켜고, 이후 20초마다 두 번 더 `blackout-trigger`로 두절을
+켜거나 끕니다. 같은 스텝에서 모듈을 켜면서 보낸 첫 트리거는 모듈 시작 시 지워지므로
+([Blackout](#blackout--연결-두절) 참조), 즉시 두절은 두 번째 발동부터 일어납니다.
+
+`etc/scenario-example.json`에 시간·조건·반복 트리거와 `_comment` 주석을 쓴 예제 파일이 들어 있습니다.
 
 ### 주의사항
 
@@ -1468,7 +1606,8 @@ curl -X POST http://127.0.0.1:8080/api/scenario/loadinline \
 - 조건 트리거 스텝은 파일 순서대로 매 틱 평가됩니다
 - 시간 해상도는 약 200ms (메인 틱 주기)
 - 한 스텝에 `at`과 `when`이 모두 있으면 `when`이 우선합니다 (중복 발동 방지)
-- 최대 128개 스텝, 스텝당 32개 파라미터
+- 최대 128개 스텝, 스텝당 32개 파라미터, 파일 크기 64KB
+- 트리거(`at`/`when`)가 없는 스텝은 건너뛰고 경고로 알려줍니다
 - `--timeout`과 함께 사용하면 시나리오 완료 후 자동 종료 가능:
   ```
   clumsy.exe --filter "udp and outbound" --scenario test.json --timeout 70
@@ -1517,8 +1656,10 @@ curl -X POST http://127.0.0.1:8080/api/scenario/loadinline \
    모듈 활성화 상태와 파라미터 값이 모두 반영되고, 모듈 목록이 즉시 갱신됩니다.
 2. **저장**: "Save current as" 입력란에 이름을 넣고 **Save**를 누르면 현재 활성화된 모듈과
    파라미터 값이 `profiles.json`에 저장됩니다. 같은 이름으로 저장하면 덮어씁니다.
+3. **삭제**: 드롭다운에서 고른 뒤 **Delete**를 누르면 `profiles.json`에서 지워집니다.
 
-API로는 `POST /api/profiles/{name}/apply`, `POST /api/profiles` (body: `{"name":"..."}`)입니다.
+API로는 `POST /api/profiles/{name}/apply`, `POST /api/profiles` (body: `{"name":"..."}`),
+`POST /api/profiles/{name}/delete`입니다.
 
 ### CLI에서 사용
 
@@ -1526,14 +1667,16 @@ API로는 `POST /api/profiles/{name}/apply`, `POST /api/profiles` (body: `{"name
 clumsy.exe --filter "udp and outbound" --profile mobile-4g
 ```
 
-`--profile` 인수로 프로파일을 적용하면, 해당 프로파일에 정의된 모듈이 자동으로 활성화되고 파라미터가 설정됩니다. `--filter`와 함께 사용해야 하며, 다른 모듈 인수와 조합할 수도 있습니다.
+`--profile` 인수로 프로파일을 적용하면, 해당 프로파일에 정의된 모듈이 자동으로 활성화되고 파라미터가 설정됩니다. 트래픽에 작용하려면 캡처가 돌아야 하므로 보통 `--filter`와 함께 쓰며, 다른 모듈 인수와 조합할 수도 있습니다(프로파일이 나중에 적용되므로 같은 키는 프로파일 값이 이깁니다).
+`profiles.json`에 없는 이름이면 저장된 프로파일 목록을 출력하고 종료 코드 `2`로 끝납니다.
 
 ### 주의사항
 
 - `profiles.json`이 없으면 프로파일 드롭다운은 빈 상태로 표시됩니다 (오류 없음)
 - 0.4부터 프로파일에는 방향 플래그(`lag-inbound` 등)도 함께 저장됩니다
-- 최대 32개 프로파일까지 저장 가능
-- 프로파일 적용 시 명시적으로 포함되지 않은 모듈의 상태는 변경되지 않습니다
+- 최대 32개 프로파일까지 저장 가능, 프로파일 하나에는 최대 32개 키(모듈 on/off 포함)
+- 저장 시에는 켜져 있는 모듈만 기록됩니다. 그래서 프로파일 적용 시 명시적으로 포함되지 않은 모듈의 상태는 변경되지 않습니다
+  (꺼야 할 모듈이 있으면 JSON에 `"모듈명": false`를 직접 넣으세요)
 - JSON 파일을 직접 편집하여 프로파일을 추가/수정할 수도 있습니다
 
 ---
@@ -1707,7 +1850,7 @@ clumsy.exe --web-bind 0.0.0.0 --web-port 8080 --web-token ci-secret-token
 - `--web-bind`가 로컬호스트가 아니면 **토큰 인증이 강제**됩니다.
 - `--web-token`을 생략하면 토큰이 자동 생성되어 콘솔에 출력됩니다.
   CI에서는 값을 고정해야 스크립트에서 재사용할 수 있습니다.
-- 외부 바인딩 시 콘솔에 보안 경고가 출력됩니다.
+- 외부 바인딩 시 콘솔에 보안 경고(`*** SECURITY WARNING ***`)가 출력됩니다.
 
 ### CI 러너에서
 
@@ -1718,7 +1861,7 @@ TOKEN=ci-secret-token
 # 1. 살아 있는지 확인 (인증 불필요)
 curl -f $CLUMSY/api/health || exit 1
 
-# 2. 조건 설정 후 캡처 시작
+# 2. 캡처 시작 후 조건 설정
 curl -sf -X POST $CLUMSY/api/filter -H "X-Clumsy-Token: $TOKEN" \
      -H "Content-Type: application/json" \
      -d '{"filter":"udp and outbound"}'
@@ -1740,7 +1883,8 @@ clumsy는 관리자 권한으로 실행되며 네트워크 트래픽을 조작�
 
 - 토큰은 평문 HTTP로 전달됩니다 (TLS 미지원). 인터넷에 노출하지 마세요.
 - 방화벽에서 해당 포트를 CI 러너 IP로만 제한하는 것을 권장합니다.
-- `/api/health`만 인증 없이 접근 가능하며, 버전과 캡처 여부만 노출합니다.
+- 인증 없이 접근 가능한 것은 `/api/health`(버전과 캡처 여부만 노출)와 `/metrics`(읽기 전용 카운터)뿐입니다.
+  `/metrics`까지 막으려면 [Prometheus 연동](#prometheus-연동)의 안내대로 소스를 고쳐야 합니다.
 
 ---
 
@@ -1794,6 +1938,7 @@ clumsy.exe --enable-plugins .\plugins --filter "udp and outbound"
 ```
 
 지정한 디렉토리의 모든 `*.dll`을 스캔하여 `clumsyGetModule`을 export 하는 것만 로드합니다.
+리눅스에서는 `*.so`를 찾으며, export 선언에서 `__declspec(dllexport)`를 빼면 됩니다.
 
 ### 현재 제한 사항
 
@@ -1802,6 +1947,9 @@ clumsy.exe --enable-plugins .\plugins --filter "udp and outbound"
   (모듈 테이블 크기 `MODULE_CNT`가 컴파일 타임 상수이기 때문입니다.
   테이블 확장은 향후 과제입니다.)
 - 최대 8개까지 로드됩니다.
+- `startUp` / `closeDown` / `process` 등 필수 필드가 비어 있는 모듈은 로드하지 않고 건너뜁니다.
+- 모듈 CLI 인수(`--drop on` 등)는 플러그인을 읽기 **전에** 적용되므로 대체된 모듈에는 전달되지 않습니다.
+  플러그인 모듈은 대시보드, REST/Pipe API, 시나리오, `--profile`로 설정하세요.
 - 로드된 DLL은 프로세스 종료 시까지 언로드되지 않습니다
   (`modules[]`가 DLL 내부 메모리를 가리키므로 use-after-free 방지 목적).
 
@@ -1825,7 +1973,7 @@ clumsy.exe --enable-plugins .\plugins --filter "udp and outbound"
 | Lag | ON, Delay = 150ms |
 
 **대시보드 순서**:
-1. Preset 드롭다운에서 `all sending packets` 선택 (또는 직접 `udp and outbound` 입력)
+1. 필터 입력창에 `udp and outbound` 입력 (Preset의 `all sending packets`를 고르면 UDP뿐 아니라 모든 송신 패킷인 `outbound`가 들어갑니다)
 2. Start 클릭
 3. Lag 체크박스 ON
 4. 펼쳐진 폼의 Delay (ms)에 `150` 입력
@@ -1957,7 +2105,7 @@ clumsy.exe --filter "udp and outbound" ^
 
 **파라미터 튜닝 예시**:
 
-| 목적 | Good(%) | Bad(%) | G>B(%) | B>G(%) |
+| 목적 | Good drop (%) | Bad drop (%) | Good to Bad (%) | Bad to Good (%) |
 |------|---------|--------|--------|--------|
 | 짧고 잦은 버스트 | 1.0 | 70.0 | 10.0 | 40.0 |
 | 길고 드문 버스트 | 0.5 | 90.0 | 2.0 | 10.0 |
@@ -1986,7 +2134,7 @@ clumsy.exe --filter "udp and outbound" ^
 |------|-----|
 | 필터 | `udp and (udp.DstPort == 7777 or udp.SrcPort == 7777)` |
 | Jitter | ON, Min = 50ms, Max = 250ms |
-| Out of Order | ON, Chance = 15.0%, Buf = 8, Delay = 300ms |
+| Out of Order | ON, Chance = 15.0%, Buffer = 8, Delay = 300ms |
 
 **이 조합이 테스트하는 것**:
 - 지연이 50~250ms로 변동 → 클라이언트 예측값과 서버 확인값의 오차 발생
@@ -2013,7 +2161,7 @@ clumsy.exe --filter "udp and (udp.DstPort==7777 or udp.SrcPort==7777)" ^
 | 항목 | 값 |
 |------|-----|
 | 필터 | `udp and outbound` |
-| Blackout | ON, Dur = 3000ms, Gap = 20000ms |
+| Blackout | ON, Duration = 3000ms, Gap = 20000ms |
 
 20초마다 3초간 완전히 끊깁니다. 이 동안 클라이언트가:
 1. 연결 두절을 감지하는지 (타임아웃 구현 여부)
@@ -2025,11 +2173,11 @@ clumsy.exe --filter "udp and (udp.DstPort==7777 or udp.SrcPort==7777)" ^
 **재연결 타임아웃 테스트**: 클라이언트 타임아웃 설정(예: 5초)보다 두절 시간을 짧게/길게 바꿔 경계값 동작을 확인합니다.
 
 ```
-Dur=4000, Gap=30000  → 타임아웃 직전까지만 끊기는 상황
-Dur=6000, Gap=30000  → 타임아웃을 초과해서 끊기는 상황
+Duration=4000, Gap=30000  → 타임아웃 직전까지만 끊기는 상황
+Duration=6000, Gap=30000  → 타임아웃을 초과해서 끊기는 상황
 ```
 
-**Trigger 버튼 활용**: 재연결 테스트를 원하는 시점(예: 특정 게임 이벤트 직후)에 수동으로 즉시 끊을 수 있습니다.
+**Trigger now 버튼 활용**: 재연결 테스트를 원하는 시점(예: 특정 게임 이벤트 직후)에 수동으로 즉시 끊을 수 있습니다.
 
 **CLI**:
 ```
@@ -2071,7 +2219,7 @@ clumsy.exe --filter "udp and outbound" ^
 | 항목 | 값 |
 |------|-----|
 | 필터 | `udp and outbound` |
-| Duplicate | ON, Count = 2, Chance = 20.0% |
+| Duplicate | ON, Copies = 2, Chance = 20.0% |
 
 패킷 5개 중 1개가 복사본과 함께 전송됩니다. 서버가 중복 패킷을 무시하거나 한 번만 처리하는지 확인합니다.
 
@@ -2141,7 +2289,8 @@ function Send-ClumsyCommand($cmd) {
     return $resp | ConvertFrom-Json
 }
 
-# clumsy를 먼저 관리자 권한으로 실행해둔 상태에서:
+# clumsy를 먼저 관리자 권한으로, --filter "udp and outbound" --timeout <초>를 붙여 실행해둔 상태에서
+# (필터 없이 띄웠다면 먼저 Send-ClumsyCommand @{cmd="filter";filter="udp and outbound"}로 캡처를 시작):
 
 # --- 단계 1: 정상 지연 (20ms) ---
 Send-ClumsyCommand @{cmd="set";module="lag";enabled=$true;"lag-time"=20}
@@ -2201,7 +2350,7 @@ Start-Process "clumsy.exe" -ArgumentList `
 | 항목 | 값 |
 |------|-----|
 | 필터 | `udp and outbound` |
-| Tamper | ON, Chance = 5.0%, Position = Front, Redo Checksum = ON |
+| Tamper | ON, Chance = 5.0%, Position = 0 (Front), Redo checksum = ON |
 
 페이로드 앞쪽 1/4을 손상시킵니다. 대부분의 게임 UDP 패킷은 헤더(패킷 타입, 시퀀스 번호, 플레이어 ID 등)가 앞쪽에 배치되므로, 서버가 잘못된 시퀀스 번호나 알 수 없는 패킷 타입을 받았을 때의 처리를 검증할 수 있습니다.
 
@@ -2210,23 +2359,23 @@ Start-Process "clumsy.exe" -ArgumentList `
 | 항목 | 값 |
 |------|-----|
 | 필터 | `udp and outbound` |
-| Tamper | ON, Chance = 10.0%, Position = Random, Redo Checksum = ON |
+| Tamper | ON, Chance = 10.0%, Position = 3 (Random), Redo checksum = ON |
 
 매 패킷마다 다른 위치를 손상시켜 광범위한 에러 케이스를 커버합니다. 퍼징(fuzzing)과 비슷한 효과로, 예상치 못한 파싱 오류나 크래시를 발견하는 데 유용합니다.
 
 **CLI (Front 포지션)**:
 ```
 clumsy.exe --filter "udp and outbound" ^
-           --tamper on --tamper-chance 5.0 --tamper-position 1 --tamper-checksum on
+           --tamper on --tamper-chance 5.0 --tamper-position 0 --tamper-checksum on
 ```
 
 **CLI (Random 포지션)**:
 ```
 clumsy.exe --filter "udp and outbound" ^
-           --tamper on --tamper-chance 10.0 --tamper-position 4 --tamper-checksum on
+           --tamper on --tamper-chance 10.0 --tamper-position 3 --tamper-checksum on
 ```
 
-> **Redo Checksum 주의**: OFF로 설정하면 IP/UDP 체크섬도 틀어져서 OS가 패킷을 드롭할 수 있습니다. 애플리케이션 레벨 에러 처리를 테스트할 때는 ON 유지를 권장합니다.
+> **Redo checksum 주의**: OFF로 설정하면 IP/UDP 체크섬도 틀어져서 OS가 패킷을 드롭할 수 있습니다. 애플리케이션 레벨 에러 처리를 테스트할 때는 ON 유지를 권장합니다.
 
 ---
 
