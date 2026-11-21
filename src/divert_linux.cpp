@@ -493,9 +493,22 @@ static int nfqCallback(struct nfq_q_handle *qh, struct nfgenmsg *nfmsg,
     meta.ipVersion = (unsigned char)(((payload[0] >> 4) == 6) ? 6 : 4);
     meta.ifIdx     = meta.outbound ? nfq_get_outdev(nfa) : nfq_get_indev(nfa);
     meta.subIfIdx  = 0;
-    // Loopback shows up as the lo interface on both physical dev queries.
-    meta.loopback  = (unsigned char)(nfq_get_physindev(nfa) == 1 ||
-                                     nfq_get_physoutdev(nfa) == 1 ? 1 : 0);
+    // lo is ifindex 1 in every network namespace (LOOPBACK_IFINDEX). The
+    // physindev/physoutdev queries this once used are only filled in for
+    // bridged packets, so "loopback" never matched anything.
+    meta.loopback  = (unsigned char)(nfq_get_indev(nfa) == 1 ||
+                                     nfq_get_outdev(nfa) == 1 ? 1 : 0);
+
+    // A loopback packet passes OUTPUT and then INPUT, and a rule on both
+    // chains - which --auto-iptables installs whenever the filter names no
+    // direction - queues it twice: lag applied twice, drop chance squared.
+    // Windows sees loopback once, as outbound, and the filter language is
+    // documented that way ("never inbound and loopback"), so the inbound pass
+    // is let through untouched here.
+    if (meta.loopback && !meta.outbound) {
+        nfq_set_verdict(qh, id, NF_ACCEPT, 0, NULL);
+        return 0;
+    }
 
     // Phase 4.3: iptables decided what reaches this queue; the clumsy filter
     // expression decides what clumsy actually messes with. Anything that does

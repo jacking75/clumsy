@@ -35,7 +35,7 @@ clumsy를 실행하려면 실행파일과 같은 디렉토리에 다음 파일�
 | `config.json` | 필터 프리셋 정의 (권장) | `etc/config.json` |
 | `config.txt` | 필터 프리셋 정의 (레거시) | `etc/config.txt` |
 | `web/index.html` | 웹 대시보드 (없으면 REST API만 동작) | `etc/web/index.html` |
-| `web/llms.txt`, `web/llms_kr.txt` | AI 에이전트용 사용 가이드 영문·한국어판 (`GET /llms.txt`, `GET /llms_kr.txt`로 제공) | `etc/web/` |
+| `web/llms.txt`, `web/llms_kr.txt` | AI 에이전트용 사용 가이드 영문·한국어판 (`GET /llms.txt`, `GET /llms_kr.txt`로 제공) | 저장소 루트 (`llms.txt`, `llms_kr.txt`) |
 
 > 빌드 시 post-build 단계에서 이 파일들이 출력 디렉토리에 자동 복사됩니다.
 
@@ -157,10 +157,10 @@ clumsy는 사람뿐 아니라 AI 코딩 에이전트(Claude Code, Codex, Cursor,
 |---|---|
 | 사전 지식 없이 사용법 파악 | `clumsy --help`는 코드에서 자동 생성됩니다. 모듈마다 한 줄 설명, 파라미터마다 범위와 기본값, 그리고 종료 코드까지 나옵니다. 권한이 필요 없고 아무것도 시작하지 않습니다. |
 | 자기 실수를 알아채기 | 모르는 옵션이나 쓸 수 없는 값이 있으면 **아무것도 시작하기 전에** 멈추고(종료 코드 2), 메시지가 고칠 방법을 알려줍니다. 조용히 무시되는 것은 없습니다. |
-| 성공 여부 판단 | 종료 코드가 구분됩니다(`0` 정상, `2` 명령줄 오류, `3` 캡처 시작 실패, `4` 이미 실행 중). 관리자 권한이 없거나 필터가 잘못돼 캡처를 못 시작하면 타임아웃까지 기다리지 않고 즉시 실패합니다. |
+| 성공 여부 판단 | 종료 코드가 구분됩니다(`0` 정상, `2` 명령줄 오류, `3` 캡처 시작 실패, `4` 다른 인스턴스와 충돌). 관리자 권한이 없거나 필터가 잘못돼 캡처를 못 시작하면 타임아웃까지 기다리지 않고 즉시 실패합니다. |
 | 자기 설명형 API | `GET /api/docs`가 모든 엔드포인트를 예시 본문·규칙과 함께 알려주고, `GET /api/modules`가 모든 파라미터의 타입·범위·현재 값을 알려줍니다. |
 | 조치 가능한 오류 | 모든 API 응답은 `status`가 있는 JSON입니다. 경로나 메서드가 틀리면 무엇을 써야 하는지 알려줍니다. 설정 응답에는 `warnings`(범위를 벗어나 잘렸거나 거부된 값), `unknownKeys` + `validKeys`, 실제로 적용된 `params`, 캡처 실행 여부가 들어 있습니다. 아무것도 적용되지 않은 요청은 조용한 `ok`가 아니라 오류로 답합니다. |
-| 에이전트용 가이드 | [`etc/web/llms_kr.txt`](etc/web/llms_kr.txt)(영문: [`llms.txt`](etc/web/llms.txt)). 실행 중인 clumsy가 `GET /llms_kr.txt`, `GET /llms.txt`로도 제공합니다. 규칙, 모듈 고르는 법, 필터 문법, 단계별 절차 2종, 문제 해결을 담았습니다. |
+| 에이전트용 가이드 | [`llms_kr.txt`](llms_kr.txt)(영문: [`llms.txt`](llms.txt)). 실행 중인 clumsy가 `GET /llms_kr.txt`, `GET /llms.txt`로도 제공합니다. 규칙, 모듈 고르는 법, 필터 문법, 단계별 절차 2종, 문제 해결을 담았습니다. |
 | 동작 검증 수단 | `GET /api/stats`가 캡처된 패킷 수와 모듈별로 영향을 준 패킷 수를 보여줍니다. |
 | 안전장치 | `--timeout`은 무슨 일이 있어도 실행을 끝내고, `POST /api/quit`은 요청 즉시 끝냅니다. |
 
@@ -265,6 +265,7 @@ clumsy.exe --filter "udp and outbound" --lag on --lag-time 100 --drop on --drop-
 - `--enable-plugins <디렉토리>`: 커스텀 모듈 DLL 로드 (기본 비활성, 보안 주의)
 - `--verbose on`: 패킷 단위 트레이스 로그
 - `--elevate on`: 관리자 권한이 아니면 UAC로 재실행
+- `--pipe-name <이름>`: 제어 파이프 `\\.\pipe\<이름>`(리눅스는 소켓 `/run/<이름>.sock`), 기본값 `clumsy`
 - `--version`: 버전 출력
 
 종료 코드:
@@ -274,7 +275,25 @@ clumsy.exe --filter "udp and outbound" --lag on --lag-time 100 --drop on --drop-
 | `0` | 정상 종료 (`--timeout` 도달, Ctrl+C, `POST /api/quit`) |
 | `2` | 명령줄 오류: 모르는 옵션, 쓸 수 없는 값, 불러올 수 없는 `--profile` / `--scenario` — 아무것도 시작하지 않음 |
 | `3` | 캡처(`--filter`)나 재생(`--replay-in`)을 시작하지 못함. 예: 관리자 권한 없음, 필터 문법 오류 |
-| `4` | 다른 clumsy가 이미 실행 중 |
+| `4` | 실행 중인 다른 clumsy와 충돌: `--web-port`나 `--pipe-name`이 이미 쓰이거나, 다른 인스턴스의 캡처와 필터가 겹침 |
+
+### 여러 인스턴스: 클라이언트마다 다른 조건
+
+clumsy는 여러 개를 동시에 실행할 수 있습니다. 예를 들어 클라이언트가 많이 도는 PC에서 클라이언트마다
+하나씩 띄워 각자 다른 조건을 줄 수 있습니다. 인스턴스마다 `--web-port`와 `--pipe-name`을 따로 주고
+(리눅스는 `--queue-num`도), 클라이언트의 흐름을 양쪽 포트로 지정합니다.
+
+```bash
+clumsy --web-port 8081 --pipe-name client1 --lag on --lag-time 150 \
+  --filter "(udp.SrcPort == 50001 and udp.DstPort == 7777) or (udp.SrcPort == 7777 and udp.DstPort == 50001)"
+clumsy --web-port 8082 --pipe-name client2 --drop on --drop-chance 10 \
+  --filter "(udp.SrcPort == 50002 and udp.DstPort == 7777) or (udp.SrcPort == 7777 and udp.DstPort == 50002)"
+```
+
+실행 중인 다른 인스턴스가 이미 캡처하는 패킷과 겹칠 수 있는 필터는 거부됩니다(종료 코드 `4`,
+`POST /api/filter`는 HTTP `409`). 메시지가 그 인스턴스와 양쪽에 모두 매치되는 예시 패킷을 알려줍니다.
+이 검사가 없으면 겹친 패킷은 먼저 본 인스턴스만 적용하고 다른 쪽은 아무 표시 없이 놓칩니다.
+클라이언트 포트를 찾는 법과 필터 형태는 에이전트 가이드(`GET /llms_kr.txt`, "절차 C")에 자세히 있습니다.
 
 
 ## 웹 대시보드와 REST API
@@ -422,8 +441,6 @@ clumsy/
 │   ├── config.json     # 필터 프리셋 (JSON)
 │   ├── config.txt      # 필터 프리셋 (레거시)
 │   ├── web/index.html  # 웹 대시보드 (단일 정적 파일)
-│   ├── web/llms.txt    # AI 에이전트용 사용 가이드 (/llms.txt로 제공)
-│   ├── web/llms_kr.txt # 같은 가이드의 한국어판 (/llms_kr.txt로 제공)
 │   └── clumsy.rc       # Windows 리소스 파일
 ├── msvc/               # Visual Studio 프로젝트
 │   └── clumsy.sln
@@ -440,20 +457,24 @@ clumsy/
 ├── docs/
 │   ├── CODING_STYLE.md # 코드 스타일 원칙
 │   ├── LINUX.md        # 리눅스 빌드/실행/제약 가이드
-│   ├── guide_en-2.html # 초보자용 가이드 (영문)
-│   └── guide.html      # 초보자용 가이드 (한국어)
+│   ├── guide_en.html   # 초보자용 가이드 (영문)
+│   ├── guide.html      # 초보자용 가이드 (한국어)
+│   ├── comic.html      # 만화로 보는 clumsy (한국어)
+│   └── comic/          # 만화 컷 이미지
 ├── Makefile            # 리눅스 빌드
-├── doc_numbers.md      # 새 문서에 붙이는 일련번호 대장
-├── manual_en-1.md      # 사용자 매뉴얼 (영문)
+├── llms.txt            # AI 에이전트용 사용 가이드 (web/에 복사되어 /llms.txt로 제공)
+├── llms_kr.txt         # 같은 가이드의 한국어판 (/llms_kr.txt로 제공)
+├── manual_en.md        # 사용자 매뉴얼 (영문)
 └── manual.md           # 사용자 매뉴얼 (한국어)
 ```
 
 
 ## 상세 문서
 
-- **AI 에이전트용 가이드**: [etc/web/llms_kr.txt](etc/web/llms_kr.txt)(영문: [etc/web/llms.txt](etc/web/llms.txt)) — 규칙, 모듈 고르는 법, 필터 문법, 단계별 절차, 문제 해결
-- **사용자 매뉴얼**: [manual.md](manual.md) — 전체 기능, 웹 UI, CLI, API 상세 설명 (영문: [manual_en-1.md](manual_en-1.md))
-- **초보자용 가이드**: [docs/guide.html](docs/guide.html) — 그림으로 따라 하는 안내서, AI 에이전트 섹션 포함 (영문: [docs/guide_en-2.html](docs/guide_en-2.html))
+- **AI 에이전트용 가이드**: [llms_kr.txt](llms_kr.txt)(영문: [llms.txt](llms.txt)) — 규칙, 모듈 고르는 법, 필터 문법, 단계별 절차, 문제 해결
+- **사용자 매뉴얼**: [manual.md](manual.md) — 전체 기능, 웹 UI, CLI, API 상세 설명 (영문: [manual_en.md](manual_en.md))
+- **초보자용 가이드**: [docs/guide.html](docs/guide.html) — 그림으로 따라 하는 안내서, AI 에이전트 섹션 포함 (영문: [docs/guide_en.html](docs/guide_en.html))
+- **만화로 보는 clumsy**: [docs/comic.html](docs/comic.html) — clumsy가 무엇이고 어떻게 쓰는지 짧은 만화로 소개
 - **리눅스 가이드**: [docs/LINUX.md](docs/LINUX.md) — 빌드, 권한, iptables 연동, 플랫폼 차이
 - **코드 스타일**: [docs/CODING_STYLE.md](docs/CODING_STYLE.md) — C++ 전환 이후 코드 규칙
 - **개발 로드맵**: [docs/ROADMAP-v2.md](docs/ROADMAP-v2.md) — 완료된 작업 및 향후 계획

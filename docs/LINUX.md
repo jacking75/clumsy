@@ -192,6 +192,18 @@ Windows와 다르게 동작하는 필터가 조용히 잘못된 트래픽을 건
 
 **미지원**: IPv6 주소 리터럴, 페이로드 매칭, 패킷/플로우 카운터.
 
+**루프백은 나가는 방향으로 한 번만 처리합니다** (Windows와 같음). 루프백 패킷은 OUTPUT과 INPUT을 모두
+지나므로, 방향을 정하지 않은 필터에서 `--auto-iptables`가 두 체인에 규칙을 넣으면 같은 패킷이 큐에 두 번
+들어옵니다. 예전에는 그대로 두 번 처리해서 lag 300ms가 약 650ms로 걸렸습니다. 이제 INPUT 쪽 루프백 패킷은
+손대지 않고 통과시키므로 `inbound and loopback`은 아무것에도 매치되지 않습니다. 또한 `loopback` 판별을
+브리지용 `physindev`/`physoutdev`에서 실제 인터페이스(lo, ifindex 1)로 바꿨습니다. 예전에는
+`outbound and loopback`이 리눅스에서 아무 패킷에도 매치되지 않았습니다.
+
+**`--auto-iptables`가 정확한 규칙을 만드는 형태**: 최상위 `or`로 이은 각 그룹이 `and`로만 이뤄져 있으면
+그룹마다 규칙 하나씩 정확하게 만들어집니다. `udp and (A or B)`처럼 `or`가 안쪽에 있으면 나누지 못해 규칙이
+넓어집니다(`-p udp`). 혼자 쓸 때는 clumsy가 다시 걸러내므로 문제없지만, 여러 인스턴스를 띄우면 넓은 규칙이
+다른 인스턴스의 트래픽까지 가져가므로 겹침으로 거부됩니다(7절 "여러 인스턴스").
+
 예:
 ```
 udp and outbound
@@ -285,7 +297,9 @@ sudo ./clumsy --replay-in cap.pcap --replay-speed 2.0
 | 대상 선택 | 필터 표현식만 | iptables 규칙 + 필터 표현식 (`--auto-iptables`로 자동화 가능) |
 | 권한 | 관리자(UAC) | `CAP_NET_ADMIN` |
 | 권한 상승 | `--elevate on`으로 UAC 재실행 | 불가 — sudo/setcap 안내만 출력 |
-| Named Pipe API | 지원 (`\\.\pipe\clumsy`) | Unix 도메인 소켓 (`/run/clumsy.sock`) |
+| Named Pipe API | 지원 (`\\.\pipe\<--pipe-name>`) | Unix 도메인 소켓 (`/run/<--pipe-name>.sock`) |
+| 여러 인스턴스 | `--web-port`·`--pipe-name`을 다르게 | 거기에 `--queue-num`도 다르게 |
+| 인스턴스 등록부 | `%ProgramData%\clumsy\instances` | `/tmp/clumsy-instances` |
 | 웹 대시보드 / REST / SSE | 지원 | 지원 (동일) |
 | `--process` 필터 | TCP/UDP 포트 테이블 | `/proc/<pid>/fd` + `/proc/net/*` |
 | duplicate 모듈 | 제약 없음 | outbound만 (IPv4/IPv6), 6절 참고 |
@@ -300,9 +314,37 @@ sudo ./clumsy --replay-in cap.pcap --replay-speed 2.0
 **프로토콜은 완전히 동일**합니다 — 양쪽 모두 `controlDispatchJson()`을 그대로 호출하므로
 JSON 요청/응답이 바이트 단위로 같습니다. 기존 파이프 자동화는 연결 부분만 바꾸면 됩니다.
 
-- 경로: `/run/clumsy.sock` (권한이 없으면 `/tmp/clumsy.sock`로 폴백)
+- 경로: `/run/clumsy.sock` (권한이 없으면 `/tmp/clumsy.sock`로 폴백). `--pipe-name <이름>`을 주면
+  `/run/<이름>.sock`(폴백 `/tmp/<이름>.sock`)
 - 퍼미션 0666 — 권한 없는 자동화 스크립트도 제어 가능 (Named Pipe의 기본 접근성과 동일)
 - 종료 시 소켓 파일 자동 삭제
+- 시작할 때 같은 이름의 소켓이 `/run`이나 `/tmp`에 살아 있으면(연결이 받아지면) 다른 clumsy가 쓰는 것으로
+  보고 종료 코드 4로 끝납니다. 응답이 없는 소켓 파일은 죽은 프로세스가 남긴 것이므로 지우고 씁니다.
+
+### 여러 인스턴스
+
+클라이언트마다 다른 조건을 주려면 clumsy를 여러 개 띄웁니다. 인스턴스마다 `--web-port`, `--pipe-name`,
+`--queue-num`을 다르게 주고 `--auto-iptables on`을 씁니다.
+
+```bash
+sudo clumsy --web-port 8081 --pipe-name client1 --queue-num 1 --auto-iptables on \
+  --filter "(udp.SrcPort == 50001 and udp.DstPort == 7777) or (udp.SrcPort == 7777 and udp.DstPort == 50001)" \
+  --lag on --lag-time 150
+sudo clumsy --web-port 8082 --pipe-name client2 --queue-num 2 --auto-iptables on \
+  --filter "(udp.SrcPort == 50002 and udp.DstPort == 7777) or (udp.SrcPort == 7777 and udp.DstPort == 50002)" \
+  --drop on --drop-chance 10
+```
+
+- **겹침 검사 대상은 iptables 규칙입니다.** NFQUEUE에서는 먼저 매치된 규칙의 큐가 패킷을 가져가고, 그 인스턴스가
+  `NF_ACCEPT`를 주면 체인의 나머지 규칙(다른 인스턴스의 규칙)은 건너뜁니다. 그래서 `--auto-iptables`일 때는 필터가
+  아니라 필터에서 만든 규칙끼리 겹치는지 검사합니다. 위처럼 `and`만으로 된 그룹을 `or`로 이으면 규칙이 정확해서
+  겹치지 않습니다.
+- `--auto-iptables` 없이 규칙을 직접 넣는다면 겹침 검사는 필터끼리만 합니다. 인스턴스마다 규칙이 서로 겹치지 않게
+  직접 관리해야 합니다.
+- 각 인스턴스가 넣는 fwmark ACCEPT 규칙은 내용이 같아도 각자 하나씩 넣고 하나씩 지우므로, 한 인스턴스가 먼저
+  끝나도 다른 인스턴스의 재주입 패킷은 계속 큐를 우회합니다.
+- 등록부는 `/tmp/clumsy-instances/<pid>.txt`입니다. 캡처 중인 인스턴스가 자기 파일에 flock을 걸고 있으므로,
+  프로세스가 어떻게 죽든 잠금이 풀리고 다음 인스턴스가 그 파일을 죽은 것으로 보고 무시·삭제합니다.
 
 Python 예시:
 
@@ -377,4 +419,8 @@ fwmark ACCEPT 규칙이 없습니다. 6절을 보세요. `--auto-iptables on`을
 
 **제어 소켓에 연결이 안 된다**
 `/run/clumsy.sock`이 없으면 `/tmp/clumsy.sock`으로 폴백됐을 수 있습니다.
-시작 배너의 `Control socket:` 줄에 실제 경로가 표시됩니다.
+시작 배너의 `Control socket:` 줄에 실제 경로가 표시됩니다. `--pipe-name`을 줬다면 그 이름의 `.sock`입니다.
+
+**두 번째 인스턴스가 "filter overlaps"로 거부된다**
+메시지의 예시 패킷을 보세요. 필터가 겹치지 않는데도 거부된다면 `--auto-iptables` 규칙이 넓어진 경우입니다
+(`udp and (...)`처럼 `or`가 안쪽에 있음). 5절의 정확한 규칙 형태로 고쳐 쓰세요.

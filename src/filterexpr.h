@@ -45,6 +45,29 @@ int filterMatch(const FilterProgram *prog, const PacketMeta *meta,
 void filterFree(FilterProgram *prog);
 
 // ---------------------------------------------------------------------------
+// Overlap analysis  (multi-instance)
+//
+// Several clumsy instances may run at once, each shaping its own traffic. A
+// packet that two of them match is shaped by whichever sees it first and
+// silently skipped by the other, so a capture whose filter could match the
+// same packet as a running instance's is refused.
+//
+// filterOverlap() decides whether any single packet could satisfy both
+// expressions. It reads the full WinDivert syntax leniently: terms outside the
+// subset above (tcp.Syn, ipv6.SrcAddr, impostor, ...) are kept as opaque
+// conditions with no known relation to anything else. That can only make the
+// answer "overlap" more often, never wrongly "disjoint".
+//
+// Returns FILTER_DISJOINT, FILTER_OVERLAP (msg describes an example packet both
+// would match) or FILTER_UNKNOWN (msg says why it could not be decided).
+// ---------------------------------------------------------------------------
+#define FILTER_DISJOINT  0
+#define FILTER_OVERLAP   1
+#define FILTER_UNKNOWN  -1
+
+int filterOverlap(const char *exprA, const char *exprB, char *msg, int msgSize);
+
+// ---------------------------------------------------------------------------
 // iptables rule derivation  (Phase 4.3 second tier, --auto-iptables)
 //
 // Turns the expression into iptables match arguments so clumsy can install the
@@ -63,6 +86,8 @@ typedef struct {
     int  chains;                 // bit mask of IPT_CHAIN_*
     char match[256];             // iptables match args, e.g. "-p udp --dport 7777"
     int  ipv6;                   // 1 = install with ip6tables instead
+    char expr[256];              // the same rule as a filter expression, for
+                                 // filterOverlap(): what really enters the queue
 } IptablesRule;
 
 #define MAX_DERIVED_RULES 8
@@ -71,3 +96,9 @@ typedef struct {
 // the rules are wider than the expression, which is worth telling the operator.
 int filterDeriveIptables(const FilterProgram *prog, IptablesRule *rules,
                          int maxRules, int *exact);
+
+// Writes the traffic the derived rules send to the queue as one expression
+// (the rules' expr fields joined with "or"). With --auto-iptables that, not the
+// filter, is what another instance's rules compete with. Returns 0 if the
+// filter does not compile or the result does not fit.
+int filterCaptureExpr(const char *filter, char *out, int outSize);

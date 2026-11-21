@@ -119,6 +119,15 @@
     <ClCompile Include="$(ProjectRoot)src\packetutil_win.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="$(ProjectRoot)src\filterexpr.cpp">
+      <Filter>Source Files\Infrastructure</Filter>
+    </ClCompile>
+    <ClCompile Include="$(ProjectRoot)src\instance.cpp">
+      <Filter>Source Files\Infrastructure</Filter>
+    </ClCompile>
+    <ClCompile Include="$(ProjectRoot)src\instance_win.cpp">
+      <Filter>Source Files\Infrastructure</Filter>
+    </ClCompile>
   </ItemGroup>
 
   <ItemGroup>
@@ -132,6 +141,9 @@
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="$(ProjectRoot)src\httpserver.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="$(ProjectRoot)src\filterexpr.h">
       <Filter>Header Files</Filter>
     </ClInclude>
   </ItemGroup>

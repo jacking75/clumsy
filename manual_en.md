@@ -51,8 +51,10 @@ If `--filter` was given on the command line, however, clumsy does not wait: it p
 `--elevate on` shows a UAC prompt and relaunches clumsy elevated
 (a new console window opens and the original instance exits).
 
-> **Note**: If clumsy is already running, the newly started instance prints `There's already an instance of clumsy running. Aborting.`
-> and exits with code `4`. The running instance is left untouched. Only one instance can run at a time.
+> **Note**: Several clumsy instances can run at once (for instance to give each client its own conditions;
+> see "Per-Client Filters and Several Instances" in chapter 3), but each needs its own `--web-port` and
+> `--pipe-name`. Started on a port or pipe name that is already in use, the new instance prints why and
+> exits with code `4`; the running one is left untouched.
 
 > **Changed in 0.4**: The old IUP-based desktop GUI has been removed.
 > Everything is done through the web dashboard, command-line options, the REST API and the Named Pipe API.
@@ -231,6 +233,44 @@ clumsy.exe --filter "udp" --process game.exe --lag on --lag-time 100
 - Ports are snapshotted at Start. Connections the process opens after Start are not included.
 - So **launch the game and connect to the server first**, then start clumsy.
 - If the process is not running or has no active ports, an error message is shown.
+- When several processes share the name, all of them are targeted. To pick one, use its port as below.
+
+### Per-Client Filters and Several Instances
+
+When one machine runs several clients (with the server on the same machine or another one), clients are
+told apart by their **local port**. Look it up after the client has connected with
+`Get-NetUDPEndpoint -OwningProcess <PID>` (`Get-NetTCPConnection` for TCP), or `ss -unap` on Linux.
+With the server on port 7777:
+
+```
+# every client
+udp.DstPort == 7777 or udp.SrcPort == 7777
+
+# one client (local port 50001): name both ports of its flow
+(udp.SrcPort == 50001 and udp.DstPort == 7777) or (udp.SrcPort == 7777 and udp.DstPort == 50001)
+```
+
+For the **same conditions** on several clients, join their groups with `or` and give them to one clumsy.
+For **different conditions** per client, run one clumsy per set of conditions, each with its own
+`--web-port` and `--pipe-name` (and `--queue-num` on Linux).
+
+```
+clumsy.exe --web-port 8081 --pipe-name client1 --lag on --lag-time 150 --filter "(udp.SrcPort == 50001 and udp.DstPort == 7777) or (udp.SrcPort == 7777 and udp.DstPort == 50001)"
+clumsy.exe --web-port 8082 --pipe-name client2 --drop on --drop-chance 10 --filter "(udp.SrcPort == 50002 and udp.DstPort == 7777) or (udp.SrcPort == 7777 and udp.DstPort == 50002)"
+```
+
+- **Overlap protection**: a filter that could match packets another running instance already captures is
+  refused (exit code `4`, HTTP `409` from `POST /api/filter`). The message names the other instance (PID,
+  web address, pipe) and an example packet both would match. A shared packet would otherwise be shaped by
+  whichever instance saw it first and silently skipped by the other.
+- Client ports alone, as in `udp.SrcPort == 50001 or udp.DstPort == 50001`, also match a packet from 50001
+  to 50002 and so overlap the instance for 50002. Name the server port as well, as above.
+- These filters match localhost traffic too (it is seen once, as outbound), so the server-on-this-machine
+  case needs no `loopback` term.
+- On Linux `--auto-iptables` turns each `or`-joined group into an exact iptables rule. Wrapping the groups,
+  as in `udp and (...)`, widens the rule to all UDP and it overlaps every other instance.
+- Give each instance its own output file names (`--stats-log`, `--report-out`, `--pcap-out`).
+- A client that reconnects often gets a new port. Send `POST /api/filter` again with the new one.
 
 ---
 
@@ -821,6 +861,7 @@ clumsy.exe --filter "<filter>" --<module> on [--<module>-<option> <value>] ...
 --web-port <n>         web server port (default: 8080)
 --web-bind <addr>      bind address (default: 127.0.0.1; anything else forces token auth)
 --web-token <token>    fixed auth token (reusable from CI scripts)
+--pipe-name <name>     control pipe \\.\pipe\<name> (Linux: /run/<name>.sock), default clumsy
 
 --verbose on/off       per-packet trace logging (on by default in Debug, off in Release)
 --elevate on           relaunch through UAC when not already Administrator
@@ -850,7 +891,7 @@ from passing a wrong option and mistaking the result for success.
 | `0` | Clean exit (`--timeout` reached, Ctrl+C, `POST /api/quit`) |
 | `2` | Bad command line: unknown option, unusable value, or a `--profile` / `--scenario` that could not be loaded |
 | `3` | The capture (`--filter`) or replay (`--replay-in`) could not start (clumsy exits at once instead of waiting) |
-| `4` | Another clumsy is already running (only the new instance exits; the running one is left alone) |
+| `4` | Clash with another running clumsy: its `--web-port` or `--pipe-name` is taken, or the filter overlaps another instance's capture (only the new instance exits) |
 
 The module list in `--help` is generated from the ParamSpec tables in the code, so if it disagrees with the list above, `--help` is right.
 
@@ -983,7 +1024,8 @@ clumsy offers two control transports at the same time.
 Both transports call **the same control layer** (`controlapi.cpp`) internally,
 so their behavior cannot drift apart. Existing Named Pipe scripts keep working unchanged.
 On Linux a Unix domain socket (`/run/clumsy.sock`, falling back to `/tmp/clumsy.sock`) takes the
-same JSON commands in place of the Named Pipe.
+same JSON commands in place of the Named Pipe. With `--pipe-name <name>` the pipe is `\\.\pipe\<name>` and
+the socket `/run/<name>.sock` (needed to run several instances).
 
 ---
 

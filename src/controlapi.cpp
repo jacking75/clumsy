@@ -307,7 +307,9 @@ std::string apiDocsJson() {
         { "POST", "/api/filter", true,
           "{\"filter\":\"udp and udp.DstPort == 7777\",\"process\":\"game.exe\"}",
           "start capturing with this filter (restarts if already capturing); "
-          "process is optional; nothing is shaped until this succeeds" },
+          "process is optional; nothing is shaped until this succeeds. 409 when "
+          "another running clumsy captures some of the same packets: the message "
+          "names it and an example packet" },
         { "POST", "/api/stop", true, NULL,
           "stop capturing; traffic flows normally again, clumsy keeps running" },
         { "POST", "/api/quit", true, NULL, "stop capturing and shut clumsy down" },
@@ -589,7 +591,7 @@ static std::string noteCaptureFailure(const char *err) {
 
 std::string apiSetFilter(const std::string &body, int *httpStatus) {
     JsonValue req;
-    char err[MSG_BUFSIZE] = "";
+    char err[1024] = "";
 
     *httpStatus = 200;
     if (!jsonParse(body, req) || !req.isObject()) {
@@ -608,8 +610,11 @@ std::string apiSetFilter(const std::string &body, int *httpStatus) {
     // Restarting with a new filter is the common case from the dashboard.
     if (appIsCapturing()) appStopCapture();
 
-    if (!appStartCapture(filter.c_str(), process.c_str(), err, sizeof(err))) {
-        *httpStatus = 400;
+    const int started = appStartCapture(filter.c_str(), process.c_str(), err, sizeof(err));
+    if (started <= 0) {
+        // 409: the request is fine, but another running clumsy already
+        // captures some of the same packets. The message names it.
+        *httpStatus = (started == CAPTURE_CONFLICT) ? 409 : 400;
         return errJson(noteCaptureFailure(err));
     }
     return okJson("\"filter\":" + quoted(filter) + ",\"process\":" + quoted(process));
@@ -950,10 +955,10 @@ std::string controlDispatchJson(const std::string &request) {
     if (cmd == "filter" || cmd == "start") {
         std::string filter  = req.str("filter");
         std::string process = req.str("process");
-        char err[MSG_BUFSIZE] = "";
+        char err[1024] = "";
         if (filter.empty()) return errJson("missing filter field");
         if (appIsCapturing()) appStopCapture();
-        if (!appStartCapture(filter.c_str(), process.c_str(), err, sizeof(err))) {
+        if (appStartCapture(filter.c_str(), process.c_str(), err, sizeof(err)) <= 0) {
             return errJson(noteCaptureFailure(err));
         }
         return okJson("\"filter\":" + quoted(filter));

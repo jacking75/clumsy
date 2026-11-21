@@ -14,12 +14,16 @@
   controlapi.cpp    ← 트랜스포트 독립 제어 계층 (HTTP·Named Pipe 공용)
   httpserver.cpp    ← 내장 HTTP 서버 (REST + SSE + 정적 파일 서빙)
   json.cpp          ← 최소 JSON 파서/이스케이퍼
+  filterexpr.cpp    ← 필터 표현식 파서. 리눅스에서는 평가기·iptables 규칙 도출,
+                      양쪽 모두에서 인스턴스 간 필터 겹침 판정(filterOverlap)
+  instance.cpp      ← 인스턴스 등록부: 캡처 중인 인스턴스끼리 필터 겹침을 막음
 
 Windows 전용
   divert.cpp        ← 캡처 백엔드: WinDivert 래퍼, 스레드 관리
   packetutil_win.cpp← 패킷 검사 헬퍼 (페이로드/체크섬/RST)
   elevate.cpp       ← UAC 권한 상승
   procfilter.cpp    ← 프로세스→포트 조회 (GetExtendedTcp/UdpTable)
+  instance_win.cpp  ← 등록부 저장소: %ProgramData%\clumsy\instances, DELETE_ON_CLOSE
   pipe.cpp          ← 제어 트랜스포트: Windows는 Named Pipe, POSIX는 Unix 소켓
 
 Linux 전용
@@ -28,8 +32,8 @@ Linux 전용
   packetutil_linux.cpp← 패킷 검사 헬퍼 (직접 헤더 파싱)
   elevate_linux.cpp   ← CAP_NET_ADMIN 확인
   procfilter_linux.cpp← 프로세스→포트 조회 (/proc/<pid>/fd + /proc/net/*)
-  filterexpr.cpp      ← 필터 표현식 파서/평가기 (WinDivert 문법 서브셋)
   iptables_linux.cpp  ← --auto-iptables 규칙 설치/제거
+  instance_linux.cpp  ← 등록부 저장소: /tmp/clumsy-instances, flock으로 생존 판별
 ```
 
 ### 플랫폼 분기 규칙
@@ -166,6 +170,23 @@ typedef struct {
 | 캡처 시작/중지, 통계 로그, 리포트 샘플링 | `appLock` (main.cpp) |
 | pcap 파일 핸들 | `pcapLock` (pcapexport.cpp) |
 | 리포트 샘플/이벤트 배열 | `reportLock` (report.cpp) |
+| 인스턴스 등록부(프로세스 간) | `regLock()` — Windows 명명 뮤텍스, 리눅스 `.lock` flock |
+
+### 여러 인스턴스
+
+clumsy는 여러 프로세스가 동시에 돕니다(클라이언트마다 다른 조건 등). 인스턴스마다 `--web-port`,
+`--pipe-name`(리눅스는 `--queue-num`도)이 달라야 하며, 이미 쓰이면 종료 코드 4입니다. 그래서:
+
+- 이름이 고정된 프로세스 전역 자원(파이프 이름, 소켓 경로, 잠금 파일)을 새로 만들지 마세요.
+  필요하면 `--pipe-name`처럼 인스턴스마다 다르게 만들 수 있어야 합니다.
+- 웹 포트는 Windows에서 `SO_EXCLUSIVEADDRUSE`로 엽니다. `SO_REUSEADDR`로 되돌리면 두 번째
+  인스턴스가 같은 포트를 공유해 버립니다.
+- 캡처 시작(`appStartCapture`)은 `instanceClaim()`으로 다른 인스턴스의 필터와 겹치는지 먼저
+  검사합니다. 겹치면 `CAPTURE_CONFLICT`(CLI 종료 코드 4, REST 409). 리눅스 `--auto-iptables`에서는
+  필터가 아니라 도출된 iptables 규칙(`filterCaptureExpr`)끼리 비교합니다. NFQUEUE는 먼저 매치된
+  규칙이 패킷을 가져가기 때문입니다.
+- 겹침 판정 `filterOverlap()`은 "분리"를 잘못 답하면 안 됩니다. 모르는 항목은 자유 변수로 두어
+  항상 "겹칠 수 있음" 쪽으로 틀리게 합니다. 바꾸면 `tests/filteroverlap_test.cpp`를 통과해야 합니다.
 
 HTTP/Pipe 스레드는 패킷 리스트를 절대 건드리지 않고 파라미터와 앱 제어 함수만 호출합니다.
 
@@ -221,7 +242,7 @@ WinDivertRecv()
 5. `MODULE_CNT` 값 증가 (`common.h`)
 6. `msvc/clumsy.vcxproj`의 `ClCompile` 목록과 `Makefile`의 `SOURCES`에 추가
 7. `utils.cpp`의 `moduleDescription()` 표에 한 줄 설명 추가 (`--help`와 `GET /api/modules`에 표시)
-8. `etc/web/llms.txt`와 `etc/web/llms_kr.txt`의 모듈 표에 파라미터 추가 — API 테스트가 양쪽의 누락을 잡습니다
+8. `llms.txt`와 `llms_kr.txt`의 모듈 표에 파라미터 추가 — API 테스트가 양쪽의 누락을 잡습니다
 
 패킷 방향은 `pac->meta.outbound`로 판별하고, 페이로드 조작이 필요하면 위의 백엔드 중립
 헬퍼를 쓰세요. `windivert.h`를 include하는 순간 리눅스 빌드가 깨집니다.
@@ -246,12 +267,13 @@ CLI 인수(`--<name> on`, `--<name>-<param> <값>`)와 REST API 노출은 자동
   clumsy가 직접 쓴 값(프로파일)과 로드 시 `scenarioLint()`를 거친 시나리오 전용입니다.
 - **모든 `/api` 응답은 `status`가 있는 JSON**입니다. 오류도 마찬가지이며(`sendApiNotFound`),
   메시지에는 무엇을 대신 써야 하는지를 담습니다.
-- **종료 코드**: 0 정상, 2 명령줄 오류, 3 캡처/재생 시작 실패, 4 이미 실행 중.
+- **종료 코드**: 0 정상, 2 명령줄 오류, 3 캡처/재생 시작 실패, 4 다른 인스턴스와 충돌(웹 포트,
+  파이프 이름, 필터 겹침).
   `--filter`를 줬는데 캡처를 못 시작하면 대기하지 않고 3으로 끝납니다.
 - **엔드포인트를 추가하면** `controlapi.cpp`의 `apiDocsJson()` 표에 설명·예시 본문과 함께 넣습니다.
-- 에이전트용 가이드는 `etc/web/llms.txt`(영문)와 `etc/web/llms_kr.txt`(한국어) 한 쌍입니다
-  (`GET /llms.txt`, `GET /llms_kr.txt`로 제공, 실행 파일 옆 `web/`에 배포). 손으로 쓰는 참조 문서이므로
-  동작을 바꾸면 **둘 다** 고칩니다.
+- 에이전트용 가이드는 저장소 루트의 `llms.txt`(영문)와 `llms_kr.txt`(한국어) 한 쌍입니다
+  (빌드가 실행 파일 옆 `web/`에 복사하고, `GET /llms.txt`, `GET /llms_kr.txt`로 제공). 손으로 쓰는
+  참조 문서이므로 동작을 바꾸면 **둘 다** 고칩니다.
 
 ### 문서는 한국어·영어 양쪽을 함께 고친다
 
@@ -260,14 +282,19 @@ CLI 인수(`--<name> on`, `--<name>-<param> <값>`)와 REST API 노출은 자동
 | 영문 | 한국어 |
 |------|--------|
 | `README.md` | `README_kr.md` |
-| `etc/web/llms.txt` | `etc/web/llms_kr.txt` |
-| `manual_en-1.md` | `manual.md` |
-| `docs/guide_en-2.html` | `docs/guide.html` |
+| `llms.txt` | `llms_kr.txt` |
+| `manual_en.md` | `manual.md` |
+| `docs/guide_en.html` | `docs/guide.html` |
 
 매뉴얼과 가이드는 두 언어판의 절 구성(제목 순서·개수, 가이드의 section id)이 1:1로 같습니다. 한쪽에 절을
 추가·삭제하면 다른 쪽도 똑같이 맞춥니다. 가이드 두 파일의 `<style>`·`<script>`는 사용자에게 보이는 문자열 외에는
 동일하게 유지합니다.
 
-`docs/LINUX.md`, `docs/CODING_STYLE.md`, `docs/ROADMAP-v2.md`는 한국어판만 있습니다. `LINUX.md`에 적은 내용 중
-사용자가 알아야 하는 것(옵션, 권한, 플랫폼 차이)은 영문 독자가 볼 수 있도록 `README.md`·`manual_en-1.md`에도 들어가야 합니다.
+`docs/LINUX.md`, `docs/CODING_STYLE.md`, `docs/ROADMAP-v2.md`, `docs/comic.html`은 한국어판만 있습니다. `LINUX.md`에 적은 내용 중
+사용자가 알아야 하는 것(옵션, 권한, 플랫폼 차이)은 영문 독자가 볼 수 있도록 `README.md`·`manual_en.md`에도 들어가야 합니다.
 `--help`와 API 메시지는 영문(ASCII) 전용입니다.
+
+### 문서 파일 이름
+
+이 저장소에는 문서 파일 이름 끝에 일련번호를 붙이는 규칙(`설계메모-7.md` 같은 형식, 사용자 공통 규칙)을
+**적용하지 않습니다.** 새 문서는 번호 없이 이름만 붙이고, 번호 대장(`doc_numbers.md`)도 두지 않습니다.

@@ -252,11 +252,50 @@ for doc in /llms.txt /llms_kr.txt; do
     || bad "$doc is missing or incomplete" "missing:$MISSING"
 done
 
-# The command line is checked before anything starts, so this runs (and fails)
-# while the instance above still holds the single-instance claim.
 ./clumsy --lag-ms 100 >/dev/null 2>&1; RC=$?
 [ "$RC" = 2 ] && ok "an unknown command line option exits with code 2" \
   || bad "unknown option was accepted" "exit code $RC"
+
+echo
+echo "########## several instances ##########"
+# A second clumsy on a taken socket name or web port must refuse to run: a
+# script addressing "port N" or the control socket would otherwise drive the
+# wrong one. --timeout 5 bounds a regression that starts anyway.
+./clumsy --web-port $((PORT + 1)) --timeout 5 >/dev/null 2>&1; RC=$?
+[ "$RC" = 4 ] && ok "a second instance on the same socket name exits with code 4" \
+  || bad "a taken socket name was accepted" "exit code $RC"
+./clumsy --web-port "$PORT" --pipe-name clumsy-apitest --timeout 5 >/dev/null 2>&1; RC=$?
+[ "$RC" = 4 ] && ok "a second instance on the same web port exits with code 4" \
+  || bad "a taken web port was accepted" "exit code $RC"
+./clumsy --pipe-name bad/name --timeout 5 >/dev/null 2>&1; RC=$?
+[ "$RC" = 2 ] && ok "an unusable --pipe-name exits with code 2" \
+  || bad "an unusable --pipe-name was accepted" "exit code $RC"
+
+./clumsy --web-port $((PORT + 1)) --pipe-name clumsy-apitest --timeout 30 --stats-console 0 \
+  >"$TMP/log2" 2>&1 &
+SECOND_PID=$!
+up=0
+for _ in $(seq 1 20); do
+  sleep 0.4
+  if has "$(curl -sS --max-time 4 "http://127.0.0.1:$((PORT + 1))/api/health" 2>/dev/null)" '"status":"ok"'; then
+    up=1; break
+  fi
+done
+[ "$up" = 1 ] && ok "a second instance with its own web port and socket name runs alongside" \
+  || bad "the second instance did not come up" "$(cat "$TMP/log2")"
+SOCK="$(grep -o '/[a-z]*/clumsy-apitest.sock' "$TMP/log2" | head -1)"
+R="$(printf '{"cmd":"quit"}' | python3 -c '
+import socket, sys
+s = socket.socket(socket.AF_UNIX); s.connect(sys.argv[1]); s.sendall(sys.stdin.buffer.read())
+print(s.recv(4096).decode())' "$SOCK" 2>&1)"
+for _ in $(seq 1 20); do kill -0 $SECOND_PID 2>/dev/null || break; sleep 0.3; done
+if has "$R" '"status":"ok"' && ! kill -0 $SECOND_PID 2>/dev/null; then
+  ok "its own socket reaches it, and only it"
+else
+  kill -9 $SECOND_PID 2>/dev/null; bad "--pipe-name did not reach the second instance" "$R"
+fi
+has "$(get /api/health)" '"status":"ok"' && ok "the first instance is unaffected" \
+  || bad "the first instance stopped answering"
 
 echo
 echo "########## shutting down ##########"

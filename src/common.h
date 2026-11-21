@@ -236,15 +236,43 @@ int buildProcessFilter(const char *processName, char *filterBuf, int bufSize,
                        char *errBuf, int errSize);
 
 // Control API transport  (pipe.cpp)
-// Windows: Named Pipe \\.\pipe\clumsy. POSIX: Unix domain socket.
+// Windows: Named Pipe \\.\pipe\<name>. POSIX: Unix domain socket /run/<name>.sock
+// (or /tmp). <name> is --pipe-name, "clumsy" by default.
 // Both speak the identical JSON protocol via controlDispatchJson().
-void pipeServerStart(void);
+// pipeServerStart returns 1 when serving, -1 when another clumsy already uses
+// the name, 0 on any other failure (the HTTP API still works).
+int  pipeServerStart(void);
 void pipeServerStop(void);
-#if !defined(_WIN32)
-// Socket path actually bound, or "" when the server did not start.
+// Pipe or socket path actually in use, or "" when the server did not start.
 const char* pipeServerPath(void);
-#endif
+// Whether a --pipe-name value is usable: 1-64 of [A-Za-z0-9._-].
+int  pipeNameValid(const char *name);
 extern volatile short pipeStopRequested; // set by "stop" command; checked in main loop
+
+// Instance registry  (instance.cpp + instance_win.cpp / instance_linux.cpp)
+//
+// Several clumsy processes may run at once, typically one per client under
+// test, each with its own conditions. Every instance that is capturing keeps a
+// record of what it captures in a shared directory, and a new capture whose
+// filter could match the same packets is refused: a packet two instances
+// match is shaped by one of them and silently never reaches the other.
+//
+// instanceClaim() checks matchExpr against every live record and, when nothing
+// overlaps, records it for this process. filter is the user's text, shown to
+// the other instances in their error messages. Returns 1 when claimed,
+// CAPTURE_CONFLICT on an overlap (errBuf names the instance and an example
+// packet), 0 when the registry cannot be used (errBuf says why).
+int  instanceClaim(const char *matchExpr, const char *filter, char *errBuf, int errSize);
+void instanceRelease(void);
+
+// Platform half, used only by instance.cpp. The registry lock serializes
+// check-and-record across processes; records of processes that died are
+// skipped (and removed where possible) by regForEachLive.
+int  regLock(char *errBuf, int errSize);
+void regUnlock(void);
+void regForEachLive(void (*fn)(const char *text, void *ctx), void *ctx);
+int  regWriteOwn(const char *text, char *errBuf, int errSize);
+void regRemoveOwn(void);
 
 // Shared module-KV helper  (utils.cpp)
 // Applies one key=value pair to the matching module (enable/disable or setParam).
@@ -484,7 +512,10 @@ extern BOOL parameterized; // true when any --key value pair was given
 // Named Pipe server, the HTTP server and the scenario runner  (Phase 2.5)
 // ---------------------------------------------------------------------------
 // Starts capture with the given filter. procName may be NULL/"" for all
-// processes. Returns 1 on success, 0 on failure with errBuf filled.
+// processes. Returns 1 on success, 0 on failure with errBuf filled, or
+// CAPTURE_CONFLICT when the filter could match packets another running clumsy
+// is already capturing (errBuf names that instance and an example packet).
+#define CAPTURE_CONFLICT (-1)
 int         appStartCapture(const char *filter, const char *procName,
                             char *errBuf, int errSize);
 void        appStopCapture(void);

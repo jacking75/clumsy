@@ -282,6 +282,106 @@ kill -0 $CLUMSY_PID 2>/dev/null && bad "process did not exit" || ok "clumsy exit
 CLUMSY_PID=""
 
 echo
+echo "########## 7. one instance per client, each with its own conditions ##########"
+# Two clients of one server port, each shaped by its own clumsy with its own
+# queue and --auto-iptables rules: client A gets 300 ms of lag, client B loses
+# everything. Then a third instance whose filter takes in client A as well
+# must be refused, on the command line and over REST.
+SRV=19997
+flow() { echo "(udp.SrcPort == $1 and udp.DstPort == $SRV) or (udp.SrcPort == $SRV and udp.DstPort == $1)"; }
+"$EXE" --web-port $((PORT + 1)) --pipe-name bt-a --queue-num 8 --auto-iptables on \
+       --filter "$(flow 40001)" --lag on --lag-time 300 --timeout 40 --stats-console 0 >"$TMP/a.log" 2>&1 &
+A_PID=$!
+sleep 1.5
+"$EXE" --web-port $((PORT + 2)) --pipe-name bt-b --queue-num 9 --auto-iptables on \
+       --filter "$(flow 40002)" --drop on --drop-chance 100 --timeout 40 --stats-console 0 >"$TMP/b.log" 2>&1 &
+B_PID=$!
+sleep 1.5
+kill -0 $A_PID 2>/dev/null && kill -0 $B_PID 2>/dev/null \
+  && ok "two instances with disjoint per-client filters both capture" \
+  || bad "an instance did not start" "$(cat "$TMP/a.log" "$TMP/b.log" | grep -i -E 'fail|overlap' | head -3)"
+
+R="$(python3 - "$SRV" <<'PY'
+import socket, sys, time
+srv = int(sys.argv[1])
+rx = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+rx.bind(("127.0.0.1", srv)); rx.settimeout(0.3)
+sent = {}
+for cport in (40001, 40002):
+    tx = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    tx.bind(("127.0.0.1", cport))
+    for _ in range(10):
+        sent.setdefault(cport, []).append(time.time())
+        tx.sendto(b"x" * 64, ("127.0.0.1", srv))
+    tx.close()
+got = {40001: 0, 40002: 0}; delay = {40001: None, 40002: None}
+deadline = time.time() + 3.0
+while time.time() < deadline:
+    try:
+        data, addr = rx.recvfrom(2048)
+    except socket.timeout:
+        continue
+    port = addr[1]
+    if port in got:
+        got[port] += 1
+        if delay[port] is None:
+            delay[port] = (time.time() - sent[port][0]) * 1000.0
+print("%d %.0f %d" % (got[40001], delay[40001] or -1, got[40002]))
+PY
+)"
+read -r GOT_A DELAY_A GOT_B <<<"$R"
+# The upper bound matters too: a loopback packet passes OUTPUT and INPUT, and
+# shaping it on both would show up as twice the lag.
+[ "${GOT_A:-0}" -eq 10 ] && [ "${DELAY_A:-0}" -ge 280 ] && [ "${DELAY_A:-0}" -lt 500 ] \
+  && ok "client A arrives, delayed once by its instance (${DELAY_A} ms)" \
+  || bad "client A was not shaped once by its own instance" "got=$GOT_A delay=$DELAY_A"
+[ "${GOT_B:-1}" -eq 0 ] && ok "client B is dropped by its instance" \
+  || bad "client B was not shaped by its own instance" "got=$GOT_B"
+
+"$EXE" --web-port $((PORT + 3)) --pipe-name bt-c --queue-num 10 --auto-iptables on \
+       --filter "udp and udp.DstPort == $SRV" --timeout 10 --stats-console 0 >"$TMP/c.log" 2>&1; RC=$?
+# It overlaps both; whichever record is read first is the one named.
+[ "$RC" = 4 ] && grep -q -E "pid ($A_PID|$B_PID)" "$TMP/c.log" \
+  && ok "an overlapping filter exits with code 4 and names the instance" \
+  || bad "an overlapping filter was accepted" "exit $RC: $(grep -i -E 'fail|overlap' "$TMP/c.log" | head -2)"
+
+BBASE="http://127.0.0.1:$((PORT + 2))"
+HC="$(curl -sS --max-time 8 -o "$TMP/409.json" -w '%{http_code}' -X POST -H 'Content-Type: application/json' \
+      --data-binary "{\"filter\":\"$(flow 40001)\"}" "$BBASE/api/filter" 2>/dev/null)"
+[ "$HC" = 409 ] && grep -q "pid $A_PID" "$TMP/409.json" \
+  && ok "POST /api/filter onto another instance's client is 409 and names it" \
+  || bad "an overlapping REST filter was accepted" "HTTP $HC $(cat "$TMP/409.json")"
+
+kill -INT $A_PID $B_PID 2>/dev/null
+for _ in $(seq 1 20); do kill -0 $A_PID 2>/dev/null || kill -0 $B_PID 2>/dev/null || break; sleep 0.3; done
+LEFT="$(iptables -S OUTPUT | grep -c -E 'queue-num (8|9) ')"
+[ "$LEFT" = 0 ] && ok "both instances removed their own iptables rules" \
+  || bad "iptables rules left behind" "$(iptables -S OUTPUT | grep -E 'queue-num (8|9) ')"
+
+# The filter the guide gives for localhost traffic has to match on Linux too.
+"$EXE" --web-port $((PORT + 1)) --pipe-name bt-lo --queue-num 8 --auto-iptables on \
+       --filter "outbound and loopback and udp.DstPort == $SRV" --lag on --lag-time 300 \
+       --timeout 20 --stats-console 0 >"$TMP/lo.log" 2>&1 &
+LO_PID=$!
+sleep 1.5
+LO_DELAY="$(python3 - "$SRV" <<'PY'
+import socket, sys, time
+srv = int(sys.argv[1])
+rx = socket.socket(socket.AF_INET, socket.SOCK_DGRAM); rx.bind(("127.0.0.1", srv)); rx.settimeout(2.5)
+tx = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+t = time.time(); tx.sendto(b"x", ("127.0.0.1", srv))
+try:
+    rx.recvfrom(100); print("%.0f" % ((time.time() - t) * 1000))
+except socket.timeout:
+    print(-1)
+PY
+)"
+kill -INT $LO_PID 2>/dev/null; wait $LO_PID 2>/dev/null
+[ "${LO_DELAY:-0}" -ge 280 ] && [ "${LO_DELAY:-0}" -lt 500 ] \
+  && ok "\"outbound and loopback\" matches localhost traffic (${LO_DELAY} ms)" \
+  || bad "\"outbound and loopback\" did not shape localhost traffic" "delay=$LO_DELAY"
+
+echo
 echo "==================================================="
 echo "  passed: $pass   failed: $fail"
 echo "==================================================="

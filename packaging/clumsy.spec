@@ -51,8 +51,8 @@ install -D -m 0755 bin/linux/clumsy        %{buildroot}%{_bindir}/clumsy
 install -D -m 0644 etc/config.json         %{buildroot}%{_datadir}/clumsy/config.json
 install -D -m 0644 etc/config.txt          %{buildroot}%{_datadir}/clumsy/config.txt
 install -D -m 0644 etc/web/index.html      %{buildroot}%{_datadir}/clumsy/web/index.html
-install -D -m 0644 etc/web/llms.txt        %{buildroot}%{_datadir}/clumsy/web/llms.txt
-install -D -m 0644 etc/web/llms_kr.txt     %{buildroot}%{_datadir}/clumsy/web/llms_kr.txt
+install -D -m 0644 llms.txt        %{buildroot}%{_datadir}/clumsy/web/llms.txt
+install -D -m 0644 llms_kr.txt     %{buildroot}%{_datadir}/clumsy/web/llms_kr.txt
 install -D -m 0644 etc/scenario-example.json %{buildroot}%{_datadir}/clumsy/scenario-example.json
 install -D -m 0644 docs/LINUX.md           %{buildroot}%{_docdir}/clumsy/LINUX.md
 install -D -m 0644 README.md               %{buildroot}%{_docdir}/clumsy/README.md

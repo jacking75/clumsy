@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>clumsy 가이드</title>
 <meta name="description" content="clumsy 초보자 가이드: 내 PC의 네트워크에 지연·손실·변조를 일부러 걸어 나쁜 네트워크를 재현하는 방법">
-<link rel="alternate" hreflang="en" href="guide_en-2.html">
+<link rel="alternate" hreflang="en" href="guide_en.html">
 <script>
 (function(){
   try{
@@ -410,7 +410,7 @@ footer .flinks{display:flex; gap:16px; justify-content:center; flex-wrap:wrap; m
       <a href="#llm">AI 에이전트</a>
       <a href="#faq">문제해결</a>
     </nav>
-    <a class="theme-btn" href="guide_en-2.html" hreflang="en" lang="en" style="text-decoration:none;">English</a>
+    <a class="theme-btn" href="guide_en.html" hreflang="en" lang="en" style="text-decoration:none;">English</a>
     <button id="themeBtn" class="theme-btn" type="button">🌓 자동</button>
   </div>
 </header>
@@ -584,7 +584,7 @@ footer .flinks{display:flex; gap:16px; justify-content:center; flex-wrap:wrap; m
       </li>
       <li>
         <b>⑤ 끝났으면 Ctrl+C</b>
-        <p>콘솔 창에서 <code>Ctrl+C</code>를 누르면 안전하게 종료됩니다. clumsy는 한 번에 하나만 실행할 수 있어서, 이미 켜져 있는 상태로 다시 실행하면 새 인스턴스가 자동으로 종료됩니다.</p>
+        <p>콘솔 창에서 <code>Ctrl+C</code>를 누르면 안전하게 종료됩니다. clumsy는 여러 개를 동시에 실행할 수 있지만(예: 클라이언트마다 다른 조건), 인스턴스마다 <code>--web-port</code>와 <code>--pipe-name</code>이 달라야 합니다. 같은 값으로 다시 실행하면 새 인스턴스가 자동으로 종료됩니다.</p>
       </li>
     </ol>
 
@@ -1112,6 +1112,7 @@ footer .flinks{display:flex; gap:16px; justify-content:center; flex-wrap:wrap; m
         <tr><td>--profile &lt;이름&gt;</td><td>profiles.json에 저장해둔 프로파일을 불러와 적용.</td></tr>
         <tr><td>--scenario &lt;파일&gt;</td><td>시나리오 JSON 파일을 로드해 시작과 동시에 재생.</td></tr>
         <tr><td>--elevate on</td><td>관리자 권한이 아니면 UAC로 자기 자신을 재실행.</td></tr>
+        <tr><td>--pipe-name &lt;이름&gt;</td><td>제어 파이프 이름(기본 clumsy). 여러 인스턴스를 동시에 띄울 때 --web-port와 함께 인스턴스마다 다르게 줍니다.</td></tr>
         <tr><td>--verbose on/off</td><td>패킷 단위 상세 로그(디버깅용, 성능 영향 큼).</td></tr>
         <tr><td>--help</td><td>전체 옵션 목록 출력. 모듈별 파라미터의 범위·기본값까지 코드에서 자동 생성되어 항상 최신입니다.</td></tr>
         <tr><td>--version</td><td>버전 출력.</td></tr>
@@ -1132,7 +1133,7 @@ footer .flinks{display:flex; gap:16px; justify-content:center; flex-wrap:wrap; m
         <tr><td>0</td><td>정상 종료 (<code>--timeout</code> 도달, Ctrl+C, <code>POST /api/quit</code>)</td></tr>
         <tr><td>2</td><td>명령줄 오류: 모르는 옵션, 쓸 수 없는 값, 불러올 수 없는 <code>--profile</code> / <code>--scenario</code>. 아무것도 시작하지 않습니다.</td></tr>
         <tr><td>3</td><td><code>--filter</code>(캡처) 또는 <code>--replay-in</code>(pcap 재생)을 줬는데 시작하지 못함 (관리자 권한 없음, 필터 문법 오류, 파일 없음 등). 기다리지 않고 바로 끝납니다.</td></tr>
-        <tr><td>4</td><td>다른 clumsy가 이미 실행 중. 새로 실행한 쪽만 끝나고 기존 인스턴스는 그대로 동작합니다.</td></tr>
+        <tr><td>4</td><td>실행 중인 다른 clumsy와 충돌: 웹 포트(<code>--web-port</code>)나 파이프 이름(<code>--pipe-name</code>)이 이미 쓰이거나, 다른 인스턴스가 캡처 중인 패킷과 필터가 겹칩니다. 새로 실행한 쪽만 끝나고 기존 인스턴스는 그대로 동작합니다.</td></tr>
       </table>
     </div>
 
@@ -1290,7 +1291,7 @@ UDP 9000 포트에 --scenario로 실행하고 HTML 리포트도 저장해.</pre>
         <tr><td>성공 여부 판단</td><td>종료 코드가 구분되고(0 / 2 / 3 / 4), 캡처를 못 시작하면 타임아웃까지 기다리지 않고 즉시 실패합니다.</td></tr>
         <tr><td>자기 설명형 API</td><td><code>GET /api/docs</code>(엔드포인트·예시 본문·규칙), <code>GET /api/modules</code>(파라미터 타입·범위·현재 값)</td></tr>
         <tr><td>조치 가능한 오류</td><td>응답에 <code>warnings</code>·<code>unknownKeys</code>·<code>validKeys</code>·실제 적용된 <code>params</code>가 들어 있고, 아무것도 적용되지 않은 요청은 오류로 답합니다.</td></tr>
-        <tr><td>에이전트용 가이드</td><td><code>GET /llms.txt</code>(영문), <code>GET /llms_kr.txt</code>(한국어). 저장소에서는 <code>etc/web/</code>에 있습니다(<a href="../etc/web/llms_kr.txt"><code>llms_kr.txt</code></a>).</td></tr>
+        <tr><td>에이전트용 가이드</td><td><code>GET /llms.txt</code>(영문), <code>GET /llms_kr.txt</code>(한국어). 저장소 루트에 있습니다(<a href="../llms_kr.txt"><code>llms_kr.txt</code></a>).</td></tr>
         <tr><td>안전장치</td><td><code>--timeout</code>은 무슨 일이 있어도 실행을 끝내고, <code>POST /api/quit</code>은 요청 즉시 끝냅니다.</td></tr>
       </table>
     </div>
@@ -1322,9 +1323,10 @@ UDP 9000 포트에 --scenario로 실행하고 HTML 리포트도 저장해.</pre>
     </details>
 
     <details class="faq-item">
-      <summary>이미 실행 중이라며 꺼져요</summary>
-      <p>clumsy는 한 번에 하나의 인스턴스만 실행할 수 있습니다. 이미 떠 있으면 <strong>새로 실행한 쪽이</strong> 종료 코드 4로 끝나고, 기존 인스턴스는 그대로 동작합니다.
-      기존 것을 대시보드나 REST API로 계속 쓰거나, <code>POST /api/quit</code>(또는 콘솔 창에서 Ctrl+C)로 끈 뒤 다시 실행하세요.</p>
+      <summary>두 번째 clumsy가 종료 코드 4로 꺼져요</summary>
+      <p>clumsy는 여러 개를 동시에 실행할 수 있지만, 웹 포트나 파이프 이름을 같이 쓸 수 없고 필터가 같은 패킷에 매치되어도 안 됩니다. 이 중 하나라도 겹치면 <strong>새로 실행한 쪽이</strong> 이유를 출력하고 종료 코드 4로 끝나며, 기존 인스턴스는 그대로 동작합니다.
+      인스턴스마다 <code>--web-port</code>와 <code>--pipe-name</code>을 따로 주세요(예: <code>--web-port 8081 --pipe-name client1</code>). 메시지에 <code>filter overlaps</code>가 나오면 필터가 이 인스턴스의 클라이언트만 가리키도록 좁히세요. 예: <code>(udp.SrcPort == 50001 and udp.DstPort == 7777) or (udp.SrcPort == 7777 and udp.DstPort == 50001)</code>.
+      하나만 쓰려던 것이라면 기존 것을 대시보드나 REST API로 계속 쓰거나, <code>POST /api/quit</code>(또는 콘솔 창에서 Ctrl+C)로 끈 뒤 다시 실행하세요.</p>
     </details>
 
     <details class="faq-item">

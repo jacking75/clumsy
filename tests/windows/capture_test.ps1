@@ -1,7 +1,8 @@
 # Windows capture regression - requires Administrator (the WinDivert driver).
 #
-# Launches one elevated clumsy (a single UAC prompt) and drives everything else
-# over the REST API from this non-elevated shell.
+# Launches one elevated clumsy (a UAC prompt; a second one for section 8b, which
+# starts a second instance) and drives everything else over the REST API from
+# this non-elevated shell.
 #
 #   powershell -ExecutionPolicy Bypass -File tests\windows\capture_test.ps1
 #
@@ -227,6 +228,31 @@ if (Test-Path $pcap) {
   if ($magic -eq [uint32]2712847316) { Ok "pcap magic 0xa1b2c3d4" } else { Bad "bad magic" $magic }
   if ($link -eq 101) { Ok "linktype 101 (LINKTYPE_RAW)" } else { Bad "linktype $link" "expected 101" }
 } else { Bad "pcap not created" "" }
+
+Write-Host ""
+Write-Host "########## 8b. a second instance (approve a second UAC prompt) ##########"
+# A capture whose filter could match packets the first instance captures must be
+# refused with 409 naming it; a disjoint one must start alongside.
+$port2 = $port + 1
+Start-Process -FilePath $exe -WorkingDirectory $dir -Verb RunAs -WindowStyle Hidden `
+  -ArgumentList "--web-port", $port2, "--pipe-name", "captest-b", "--timeout", "120", "--stats-console", "0"
+$savedPort = $port; $port = $port2
+$ready2 = $false
+for ($i = 0; $i -lt 40; $i++) {
+  Start-Sleep -Seconds 1
+  if ((Http GET "/api/health" $null) -like '*"status":"ok"*') { $ready2 = $true; break }
+}
+if ($ready2) {
+  $r = Http POST "/api/filter" ("{""filter"":""udp and udp.DstPort == $udp""}")
+  if ($r -like '*overlaps*' -and $r -like '*pid*') { Ok "an overlapping filter is refused and names the instance" }
+  else { Bad "an overlapping filter was accepted" $r }
+  $r = Http POST "/api/filter" ("{""filter"":""udp and outbound and udp.DstPort == $($udp - 1)""}")
+  if ($r -like '*"status":"ok"*') { Ok "a disjoint filter captures alongside the first instance" }
+  else { Bad "a disjoint filter was refused" $r }
+  [void](Http POST "/api/quit" "")
+} else { Bad "the second instance did not come up" "" }
+$port = $savedPort
+Start-Sleep -Seconds 2
 
 Write-Host ""
 Write-Host "########## 9. clean stop ##########"

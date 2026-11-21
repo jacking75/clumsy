@@ -17,6 +17,7 @@
 #include <time.h>
 
 #include "common.h"
+#include "filterexpr.h"
 #include "httpserver.h"
 
 #if !defined(_WIN32)
@@ -419,6 +420,28 @@ int appStartCapture(const char *filter, const char *procName,
                  filter, procFragment, impostorClause);
     }
 
+    // Refuse a filter another running clumsy could also match: whichever saw
+    // a shared packet first would shape it and the other would never know.
+    {
+        const char *match = combinedFilter;
+        int claim;
+#if !defined(_WIN32)
+        // With --auto-iptables the competing thing is the NFQUEUE rules, which
+        // can be wider than the filter: a packet the first instance's rule
+        // takes is accepted there and never reaches the second one's queue.
+        char captureExpr[FILTER_BUFSIZE * 4];
+        if (parseBoolValue(argGet("auto-iptables")) &&
+            filterCaptureExpr(combinedFilter, captureExpr, sizeof(captureExpr))) {
+            match = captureExpr;
+        }
+#endif
+        claim = instanceClaim(match, filter, errBuf, errSize);
+        if (claim != 1) {
+            LeaveCriticalSection(&appLock);
+            return claim;
+        }
+    }
+
     // Before divertStart(), not after: it spawns the read and clock loops
     // already running, and with lag or jitter left enabled from a previous run
     // the first packets can reach latencyRecord() while this thread is still
@@ -436,6 +459,7 @@ int appStartCapture(const char *filter, const char *procName,
         ok = 1;
     } else {
         setErr(errBuf, errSize, divertMsg);
+        instanceRelease();
     }
 
     if (ok) {
@@ -493,6 +517,7 @@ void appStopCapture(void) {
         statsLogStop();
         pcapExportStop();
         reportSessionStop();
+        instanceRelease();
     }
     LeaveCriticalSection(&appLock);
 
@@ -507,41 +532,6 @@ void appStopCapture(void) {
 // ---------------------------------------------------------------------------
 // Startup helpers
 // ---------------------------------------------------------------------------
-
-// Returns TRUE when another clumsy already holds the single-instance claim.
-static BOOL checkIsRunning() {
-#if defined(_WIN32)
-    // It will be closed and destroyed when program terminates (according to MSDN).
-    HANDLE hStartEvent = CreateEventW(NULL, FALSE, FALSE, L"Global\\CLUMSY_IS_RUNNING_EVENT_NAME");
-
-    if (hStartEvent == NULL)
-        return TRUE;
-
-    if (GetLastError() == ERROR_ALREADY_EXISTS) {
-        CloseHandle(hStartEvent);
-        return TRUE;
-    }
-
-    return FALSE;
-#else
-    // An advisory lock on a pidfile: the kernel drops it when the process exits,
-    // however it exits, so a crashed clumsy never leaves a stale claim behind.
-    // Deliberately left open for the lifetime of the process.
-    static int lockFd = -1;
-    lockFd = open("/var/lock/clumsy.lock", O_CREAT | O_RDWR, 0644);
-    if (lockFd < 0) {
-        // /var/lock may be unwritable (unprivileged run); fall back to /tmp.
-        lockFd = open("/tmp/clumsy.lock", O_CREAT | O_RDWR, 0644);
-    }
-    if (lockFd < 0) return FALSE;   // cannot tell, so do not block startup
-
-    if (flock(lockFd, LOCK_EX | LOCK_NB) != 0) {
-        close(lockFd);
-        return TRUE;
-    }
-    return FALSE;
-#endif
-}
 
 // Apply every --<module> / --<module>-<param> argument to its module.
 static void applyCliModuleParams(void) {
@@ -584,17 +574,17 @@ static void applyCliModuleParams(void) {
 // Longest key the argument store keeps (ARG_KEY_SIZE in utils.cpp).
 #define ARG_KEY_MAX 48
 
-// Process exit codes. Documented in --help, README and etc/web/llms.txt.
+// Process exit codes. Documented in --help, README and llms.txt.
 #define EXIT_BAD_USAGE       2   // unknown option, unusable value, missing input file
 #define EXIT_START_FAILED    3   // --filter / --replay-in could not start
-#define EXIT_ALREADY_RUNNING 4   // another clumsy holds the single-instance claim
+#define EXIT_CONFLICT        4   // web port, pipe name or filter clashes with another clumsy
 
 // Every non-module option some argGet() call reads. Add new options here as
 // well as in printUsage(), or validateCliArgs() will reject them.
 static const char *const globalArgs[] = {
     "filter", "process", "timeout", "elevate",
     "queue-num", "inject-mark", "auto-iptables",
-    "web", "web-port", "web-bind", "web-token",
+    "web", "web-port", "web-bind", "web-token", "pipe-name",
     "profile", "scenario",
     "stats-log", "stats-interval", "stats-console",
     "pcap-out", "pcap-stage", "pcap-max-packets", "pcap-max-bytes",
@@ -871,6 +861,23 @@ static void printUsage(void) {
 "  --web-bind <addr>        bind address (default 127.0.0.1; token required\n"
 "                           for anything else)\n"
 "  --web-token <token>      fixed auth token instead of a random one\n"
+"\n"
+"Several instances (e.g. one per client, each with its own conditions):\n"
+#if defined(_WIN32)
+"  --pipe-name <name>       control pipe \\\\.\\pipe\\<name> (default clumsy)\n"
+#else
+"  --pipe-name <name>       control socket /run/<name>.sock (default clumsy)\n"
+#endif
+"  Give every instance its own --web-port and --pipe-name"
+#if !defined(_WIN32)
+" (and --queue-num)"
+#endif
+". A filter that\n"
+"  could match the same packets as another running instance is refused,\n"
+"  naming that instance and an example packet. To give one client per\n"
+"  instance, pin both ports of the client's flow:\n"
+"    \"(udp.SrcPort == 50001 and udp.DstPort == 7777) or\n"
+"     (udp.SrcPort == 7777 and udp.DstPort == 50001)\"\n"
 "\n");
 
     printModuleUsage();
@@ -919,7 +926,8 @@ static void printUsage(void) {
 "  2  bad command line: unknown option, unusable value, or a --profile /\n"
 "     --scenario that could not be loaded\n"
 "  3  the capture (--filter) or replay (--replay-in) could not start\n"
-"  4  another clumsy is already running\n");
+"  4  clash with another running clumsy: its --web-port or --pipe-name is\n"
+"     taken, or the filter overlaps another instance's capture\n");
 }
 
 int main(int argc, char* argv[]) {
@@ -973,12 +981,11 @@ int main(int argc, char* argv[]) {
 
     installShutdownHandler();
 
-    if (checkIsRunning()) {
-        fprintf(stderr,
-                "There's already an instance of clumsy running. Aborting.\n"
-                "Drive the running one over its REST API instead (GET /api/docs on its\n"
-                "web port, 8080 by default), or stop it first with POST /api/quit.\n");
-        return EXIT_ALREADY_RUNNING;
+    if (argGet("pipe-name") && !pipeNameValid(argGet("pipe-name"))) {
+        fprintf(stderr, "clumsy: --pipe-name %s: use 1-64 letters, digits, '-', '_' or '.'\n"
+                        "Nothing was started. Run clumsy --help for every option.\n",
+                argGet("pipe-name"));
+        return EXIT_BAD_USAGE;
     }
 
     // Elevation is opt-in now: a console app that silently relaunches itself in
@@ -1061,14 +1068,30 @@ int main(int argc, char* argv[]) {
         }
     }
 
-    pipeServerStart();
+    // A pipe name or web port that another clumsy holds is fatal, not a
+    // warning: a script talking to "port 8080" or "\\.\pipe\clumsy" would
+    // silently be driving that other instance instead of this one.
+    if (pipeServerStart() < 0) {
+        fprintf(stderr, "clumsy: the control pipe name is in use by another clumsy. Pass a "
+                        "unique --pipe-name (and --web-port) to run several at once.\n");
+        return EXIT_CONFLICT;
+    }
 
     webEnabled = 1;
     if (argGet("web") && !parseBoolValue(argGet("web"))) webEnabled = 0;
     if (webEnabled) {
         const char *bindAddr = argGet("web-bind");
         int port = argGetInt("web-port", 8080);
-        if (!httpServerStart(bindAddr ? bindAddr : "127.0.0.1", port, argGet("web-token"))) {
+        const int started = httpServerStart(bindAddr ? bindAddr : "127.0.0.1", port,
+                                            argGet("web-token"));
+        if (started < 0) {
+            fprintf(stderr, "clumsy: web port %d is in use, by another clumsy or another "
+                            "program. Pass a free --web-port (and a unique --pipe-name) to "
+                            "run several at once.\n", port);
+            pipeServerStop();
+            return EXIT_CONFLICT;
+        }
+        if (!started) {
             INFO("WARNING: web dashboard failed to start; continuing without it.");
             webEnabled = 0;
         }
@@ -1088,7 +1111,7 @@ int main(int argc, char* argv[]) {
         INFO("  Web dashboard : disabled");
     }
 #if defined(_WIN32)
-    INFO("  Named Pipe    : \\\\.\\pipe\\clumsy");
+    INFO("  Named Pipe    : %s", pipeServerPath()[0] ? pipeServerPath() : "unavailable");
 #else
     INFO("  Control socket: %s",
          pipeServerPath()[0] ? pipeServerPath() : "unavailable");
@@ -1101,14 +1124,15 @@ int main(int argc, char* argv[]) {
 
     // auto-start when a filter was given on the command line
     if (argGet("filter")) {
-        char err[MSG_BUFSIZE] = "";
-        if (!appStartCapture(argGet("filter"), argGet("process"), err, sizeof(err))) {
+        char err[1024] = "";
+        const int started = appStartCapture(argGet("filter"), argGet("process"), err, sizeof(err));
+        if (started <= 0) {
             // --filter is a request to capture now. Idling with the dashboard
             // up is right when no filter was given, but here it would leave a
             // script waiting out its whole --timeout on a clumsy that shapes
             // nothing and then exits 0. Fail the run instead.
             INFO("Failed to start capture: %s", err);
-            exitCode = EXIT_START_FAILED;
+            exitCode = (started == CAPTURE_CONFLICT) ? EXIT_CONFLICT : EXIT_START_FAILED;
         }
     }
 

@@ -1,6 +1,6 @@
 # clumsy 사용 매뉴얼
 
-**Language**: [English](manual_en-1.md) | 한국어
+**Language**: [English](manual_en.md) | 한국어
 
 ---
 
@@ -51,8 +51,10 @@ clumsy needs Administrator rights to open the WinDivert driver. Restart the cons
 `--elevate on`을 붙이면 UAC 창을 띄워 관리자 권한으로 자기 자신을 재실행합니다
 (새 콘솔 창이 열리고 원래 인스턴스는 종료됩니다).
 
-> **주의**: 이미 실행 중인 clumsy가 있으면 새로 실행한 쪽이 `There's already an instance of clumsy running. Aborting.`을
-> 출력하고 종료 코드 `4`로 끝납니다. 기존 인스턴스는 그대로 동작합니다. 한 번에 하나만 실행 가능합니다.
+> **참고**: clumsy는 여러 개를 동시에 실행할 수 있습니다(클라이언트마다 다른 조건을 줄 때 등, 3장
+> "클라이언트별 필터와 여러 인스턴스" 참고). 단 인스턴스마다 `--web-port`와 `--pipe-name`이 달라야 합니다.
+> 이미 쓰이는 포트나 파이프 이름으로 실행하면 새로 실행한 쪽이 이유를 출력하고 종료 코드 `4`로 끝나며,
+> 기존 인스턴스는 그대로 동작합니다.
 
 > **버전 0.4부터의 변경**: 기존 IUP 기반 데스크톱 GUI 창은 제거되었습니다.
 > 모든 조작은 웹 대시보드 · CLI 인수 · REST API · Named Pipe API로 수행합니다.
@@ -231,6 +233,42 @@ clumsy.exe --filter "udp" --process game.exe --lag on --lag-time 100
 - 포트는 Start 시점에 스냅샷됩니다. Start 이후에 프로세스가 새로 연 연결은 필터에 포함되지 않습니다.
 - 따라서 **게임을 먼저 실행하고 서버에 접속한 후** clumsy를 Start하는 것이 좋습니다.
 - 프로세스가 실행 중이 아니거나 활성 포트가 없으면 오류 메시지가 표시됩니다.
+- 같은 이름의 프로세스가 여러 개면 전부 대상이 됩니다. 그중 하나만 고르려면 아래처럼 포트로 지정하세요.
+
+### 클라이언트별 필터와 여러 인스턴스
+
+한 PC에서 클라이언트 여러 개를 돌릴 때(서버가 같은 PC든 다른 PC든), 클라이언트는 **로컬 포트**로 구분합니다.
+포트는 클라이언트가 접속한 뒤 `Get-NetUDPEndpoint -OwningProcess <PID>`(TCP는 `Get-NetTCPConnection`),
+리눅스는 `ss -unap`로 확인합니다. 서버 포트가 7777일 때:
+
+```
+# 모든 클라이언트
+udp.DstPort == 7777 or udp.SrcPort == 7777
+
+# 클라이언트 하나(로컬 포트 50001): 흐름의 양쪽 포트를 모두 적습니다
+(udp.SrcPort == 50001 and udp.DstPort == 7777) or (udp.SrcPort == 7777 and udp.DstPort == 50001)
+```
+
+여러 클라이언트에 **같은 조건**이면 위 그룹을 `or`로 이어 clumsy 하나에 줍니다.
+클라이언트마다 **다른 조건**이면 조건마다 clumsy를 하나씩 띄우고, 인스턴스마다 `--web-port`와 `--pipe-name`
+(리눅스는 `--queue-num`도)을 다르게 줍니다.
+
+```
+clumsy.exe --web-port 8081 --pipe-name client1 --lag on --lag-time 150 --filter "(udp.SrcPort == 50001 and udp.DstPort == 7777) or (udp.SrcPort == 7777 and udp.DstPort == 50001)"
+clumsy.exe --web-port 8082 --pipe-name client2 --drop on --drop-chance 10 --filter "(udp.SrcPort == 50002 and udp.DstPort == 7777) or (udp.SrcPort == 7777 and udp.DstPort == 50002)"
+```
+
+- **겹침 방지**: 실행 중인 다른 인스턴스가 이미 캡처하는 패킷과 겹칠 수 있는 필터는 거부됩니다(종료 코드 `4`,
+  `POST /api/filter`는 HTTP `409`). 메시지에 상대 인스턴스(PID, 웹 주소, 파이프)와 양쪽에 모두 매치되는 예시 패킷이
+  나옵니다. 겹친 패킷은 먼저 본 인스턴스만 적용하고 다른 쪽은 아무 표시 없이 놓치기 때문입니다.
+- `udp.SrcPort == 50001 or udp.DstPort == 50001`처럼 클라이언트 포트만 쓰면 50001→50002 패킷도 매치되어
+  50002용 인스턴스와 겹칩니다. 위처럼 서버 포트까지 적으세요.
+- 이 필터들은 localhost 트래픽에도 매치되므로(나가는 방향으로 한 번 잡힘) 서버가 같은 PC에 있어도 `loopback`
+  조건이 필요 없습니다.
+- 리눅스 `--auto-iptables`는 `or`로 이은 그룹마다 정확한 iptables 규칙을 만듭니다. `udp and (...)`처럼 그룹을
+  묶으면 규칙이 UDP 전체로 넓어져 다른 인스턴스와 겹칩니다.
+- 출력 파일(`--stats-log`, `--report-out`, `--pcap-out`)은 인스턴스마다 다른 이름을 주세요.
+- 클라이언트가 다시 접속하면 포트가 바뀌는 경우가 많습니다. 새 포트로 `POST /api/filter`를 다시 보내세요.
 
 ---
 
@@ -821,6 +859,7 @@ clumsy.exe --filter "필터식" --모듈명 on [--모듈명-옵션 값] ...
 --web-port <n>         웹 서버 포트 (기본: 8080)
 --web-bind <주소>      바인딩 주소 (기본: 127.0.0.1, 그 외에는 토큰 인증 강제)
 --web-token <토큰>     고정 인증 토큰 (CI 스크립트에서 재사용)
+--pipe-name <이름>     제어 파이프 \\.\pipe\<이름> (리눅스: /run/<이름>.sock), 기본 clumsy
 
 --verbose on/off       패킷 단위 트레이스 로그 (Debug 기본 on, Release 기본 off)
 --elevate on           관리자 권한이 아니면 UAC로 자기 자신을 재실행
@@ -850,7 +889,7 @@ clumsy.exe --filter "필터식" --모듈명 on [--모듈명-옵션 값] ...
 | `0` | 정상 종료 (`--timeout` 도달, Ctrl+C, `POST /api/quit`) |
 | `2` | 명령줄 오류: 모르는 옵션, 쓸 수 없는 값, 불러올 수 없는 `--profile` / `--scenario` |
 | `3` | 캡처(`--filter`)나 재생(`--replay-in`)을 시작하지 못함 (대기하지 않고 즉시 종료) |
-| `4` | 다른 clumsy가 이미 실행 중 (새로 실행한 쪽만 종료하고 기존 인스턴스는 그대로) |
+| `4` | 실행 중인 다른 clumsy와 충돌: `--web-port`나 `--pipe-name`이 이미 쓰이거나, 다른 인스턴스의 캡처와 필터가 겹침 (새로 실행한 쪽만 종료) |
 
 `--help`의 모듈 목록은 코드의 ParamSpec에서 자동 생성되므로, 위 목록과 다르면 `--help`가 맞습니다.
 
@@ -983,7 +1022,8 @@ clumsy는 두 가지 제어 트랜스포트를 동시에 제공합니다.
 두 트랜스포트는 내부적으로 **동일한 제어 계층**(`controlapi.cpp`)을 호출하므로
 동작이 갈라지지 않습니다. 기존 Named Pipe 스크립트는 수정 없이 그대로 동작합니다.
 리눅스에서는 Named Pipe 대신 Unix 도메인 소켓(`/run/clumsy.sock`, 안 되면 `/tmp/clumsy.sock`)이
-같은 JSON 명령을 받습니다.
+같은 JSON 명령을 받습니다. `--pipe-name <이름>`을 주면 파이프는 `\\.\pipe\<이름>`, 소켓은 `/run/<이름>.sock`이 됩니다
+(여러 인스턴스를 띄울 때 필요).
 
 ---
 

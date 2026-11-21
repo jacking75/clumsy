@@ -291,12 +291,54 @@ foreach ($doc in @("/llms.txt", "/llms_kr.txt")) {
   else { Bad "$doc is missing or incomplete" ("status " + (Code $raw) + "; missing: " + ($missing -join ", ")) }
 }
 
-# The command line is checked before anything starts, so this runs (and fails)
-# while the instance above still holds the single-instance claim.
 $bad = Start-Process -FilePath $exe -WorkingDirectory $dir -PassThru -Wait -WindowStyle Hidden `
        -ArgumentList "--lag-ms", "100"
 if ($bad.ExitCode -eq 2) { Ok "an unknown command line option exits with code 2" }
 else { Bad "unknown option was accepted" "exit code $($bad.ExitCode)" }
+
+Write-Host ""
+Write-Host "########## several instances ##########"
+# A second clumsy on a taken pipe name or web port must refuse to run: a script
+# addressing "port N" or "\\.\pipe\clumsy" would otherwise drive the wrong one.
+# --timeout 5 bounds a regression that starts anyway.
+$second = Start-Process -FilePath $exe -WorkingDirectory $dir -PassThru -Wait -WindowStyle Hidden `
+          -ArgumentList "--web-port", ($port + 1), "--timeout", "5"
+if ($second.ExitCode -eq 4) { Ok "a second instance on the same pipe name exits with code 4" }
+else { Bad "a taken pipe name was accepted" "exit code $($second.ExitCode)" }
+
+$second = Start-Process -FilePath $exe -WorkingDirectory $dir -PassThru -Wait -WindowStyle Hidden `
+          -ArgumentList "--web-port", $port, "--pipe-name", "clumsy-apitest", "--timeout", "5"
+if ($second.ExitCode -eq 4) { Ok "a second instance on the same web port exits with code 4" }
+else { Bad "a taken web port was accepted" "exit code $($second.ExitCode)" }
+
+$second = Start-Process -FilePath $exe -WorkingDirectory $dir -PassThru -Wait -WindowStyle Hidden `
+          -ArgumentList "--pipe-name", "bad/name", "--timeout", "5"
+if ($second.ExitCode -eq 2) { Ok "an unusable --pipe-name exits with code 2" }
+else { Bad "an unusable --pipe-name was accepted" "exit code $($second.ExitCode)" }
+
+$second = Start-Process -FilePath $exe -WorkingDirectory $dir -PassThru -WindowStyle Hidden `
+          -ArgumentList "--web-port", ($port + 1), "--pipe-name", "clumsy-apitest", "--timeout", "30", "--stats-console", "0"
+$savedPort = $port; $port = $port + 1
+$up = $false
+for ($i = 0; $i -lt 20; $i++) {
+  Start-Sleep -Milliseconds 400
+  if ((Body (Http GET "/api/health" $null)) -like '*"status":"ok"*') { $up = $true; break }
+}
+if ($up) { Ok "a second instance with its own web port and pipe name runs alongside" }
+else { Bad "the second instance did not come up" "" }
+try {
+  $pc = New-Object System.IO.Pipes.NamedPipeClientStream(".", "clumsy-apitest", [System.IO.Pipes.PipeDirection]::InOut)
+  $pc.Connect(3000); $pc.ReadMode = [System.IO.Pipes.PipeTransmissionMode]::Message
+  $b = [Text.Encoding]::UTF8.GetBytes('{"cmd":"quit"}'); $pc.Write($b, 0, $b.Length); $pc.Flush()
+  $buf = New-Object byte[] 4096; $n = $pc.Read($buf, 0, $buf.Length); $pc.Close()
+  $reply = [Text.Encoding]::UTF8.GetString($buf, 0, $n)
+} catch { $reply = "$_" }
+Start-Sleep -Seconds 2
+if ($reply -like '*"status":"ok"*' -and $second.HasExited) { Ok "its own pipe reaches it, and only it" }
+else { $second | Stop-Process -Force -ErrorAction SilentlyContinue; Bad "--pipe-name did not reach the second instance" $reply }
+$port = $savedPort
+if ((Body (Http GET "/api/health" $null)) -like '*"status":"ok"*') { Ok "the first instance is unaffected" }
+else { Bad "the first instance stopped answering" "" }
 
 Write-Host ""
 Write-Host "########## shutting down ##########"

@@ -42,8 +42,11 @@ Prefer them over anything you remember about clumsy or about similar tools
    browser, your own API connection, and clumsy's own control port.
 8. clumsy runs until it is told to stop. Launch it in the background, then
    poll `GET /api/health` until it answers.
-9. Only one clumsy can run at a time (exit code 4 otherwise). If one is
-   already running, drive that one over REST or stop it with `POST /api/quit`.
+9. Several clumsy instances can run at once, e.g. one per client under test,
+   each with its own conditions (Recipe C). Each one needs its own
+   `--web-port` and `--pipe-name` (on Linux also `--queue-num`); a taken one
+   ends the new instance with exit code 4. A clumsy answering on a port you
+   did not start is not yours: leave it alone.
 10. Read the whole reply. A REST reply can be `"status":"ok"` and still carry
     `"unknownKeys"` (a key no module has) or `"warnings"` (a value that was
     clamped or not applied). `"params"` shows what is actually in effect, and
@@ -162,7 +165,9 @@ Exit codes:
        on stderr names the option and suggests the right spelling.
     3  the capture (--filter) or replay (--replay-in) could not start: not
        elevated, or the filter did not parse. Nothing is being shaped.
-    4  another clumsy is already running.
+    4  clash with another running clumsy: its --web-port or --pipe-name is
+       taken, or the filter could match packets another instance already
+       captures. The message names the instance (pid, web, pipe, filter).
 
 
 ## Recipe B: start once, change conditions over REST
@@ -225,6 +230,77 @@ REST conventions:
   non-loopback `--web-bind`: send it as the `X-Clumsy-Token` header.
 - `GET /api/stream` is a Server-Sent Events stream that never ends. From a
   script, poll `GET /api/stats` instead.
+
+
+## Recipe C: several clients on one machine
+
+Use this when one machine runs several clients (and maybe the server too)
+and you want to degrade all of them, some of them, or each one differently.
+It works the same whether the server is on this machine or another one; run
+clumsy on the machine where the clients are.
+
+Pick the layout first:
+
+- Same conditions for every client, or for a chosen few: one clumsy, with a
+  filter that selects those clients.
+- Different conditions per client: one clumsy per set of conditions. Clients
+  that share conditions share an instance. Each instance gets its own
+  `--web-port`, `--pipe-name` and output file names, plus its own
+  `--queue-num` on Linux.
+
+Find each client's local port. A client usually gets a random port each time
+it connects, so look it up after it has connected (or make the client bind a
+fixed port, which is simpler):
+
+    Windows   Get-NetUDPEndpoint -OwningProcess <pid>
+              Get-NetTCPConnection -OwningProcess <pid> -State Established
+    Linux     ss -unap | grep <pid>        ss -tnap | grep <pid>
+
+Filters, with the server on port 7777 (write `tcp` instead of `udp` for TCP):
+
+    every client       udp.DstPort == 7777 or udp.SrcPort == 7777
+    one client (50001) (udp.SrcPort == 50001 and udp.DstPort == 7777) or (udp.SrcPort == 7777 and udp.DstPort == 50001)
+    two clients        (udp.SrcPort == 50001 and udp.DstPort == 7777) or (udp.SrcPort == 7777 and udp.DstPort == 50001) or (udp.SrcPort == 50002 and udp.DstPort == 7777) or (udp.SrcPort == 7777 and udp.DstPort == 50002)
+    a remote server    ip.DstAddr == 10.0.0.5 or ip.SrcAddr == 10.0.0.5  (every client of it)
+
+- Name both ports of a client's flow, as above. `udp.SrcPort == 50001 or
+  udp.DstPort == 50001` alone would also match a packet from 50001 to 50002,
+  so it overlaps the instance for 50002 and is refused.
+- Keep the filter a plain OR of AND-only groups, like the examples. On Linux
+  `--auto-iptables` turns each group into an exact iptables rule; a group
+  inside `udp and (...)` cannot be split, the rule widens to all UDP, and
+  every other instance overlaps it.
+- These filters match localhost traffic too (it is seen once, as outbound),
+  so the server-on-this-machine case needs no `loopback` term, and clumsy's
+  own REST port is not touched.
+- Lag is added in each direction the filter matches: `--lag-time 100` adds
+  about 200 ms to the round trip. To delay one direction only, keep just the
+  matching group, e.g. `(udp.SrcPort == 50001 and udp.DstPort == 7777)` for
+  client-to-server. Localhost packets all count as outbound, so the
+  `<module>-inbound` / `-outbound` switches cannot separate them; the port
+  order can.
+
+Two clients with different conditions (PowerShell; on Linux run the same
+options with `sudo` and add `--auto-iptables on --queue-num 1` and `2`):
+
+    Start-Process clumsy.exe -WindowStyle Hidden -ArgumentList '--web-port','8081','--pipe-name','client1','--timeout','600','--stats-console','0','--filter','"(udp.SrcPort == 50001 and udp.DstPort == 7777) or (udp.SrcPort == 7777 and udp.DstPort == 50001)"','--lag','on','--lag-time','150'
+    Start-Process clumsy.exe -WindowStyle Hidden -ArgumentList '--web-port','8082','--pipe-name','client2','--timeout','600','--stats-console','0','--filter','"(udp.SrcPort == 50002 and udp.DstPort == 7777) or (udp.SrcPort == 7777 and udp.DstPort == 50002)"','--drop','on','--drop-chance','10'
+
+Then drive each one on its own port exactly as in Recipe B
+(`http://127.0.0.1:8081/api/...`, `http://127.0.0.1:8082/api/...`), and
+`POST /api/quit` each one at the end.
+
+If a filter could match a packet another running instance already captures,
+the start is refused: exit code 4 on the command line, HTTP 409 from
+`POST /api/filter`. The message names the other instance and an example
+packet both would match:
+
+    filter overlaps the clumsy with pid 4120 (web http://127.0.0.1:8081/, pipe \\.\pipe\client1)
+    capturing "...": both would match udp, src port 50001, dst port 7777. ...
+
+Narrow the filter so that example no longer matches, or stop the other
+instance if it is a leftover of yours. A client that reconnects usually gets a
+new port: look it up again and send `POST /api/filter` with the new port.
 
 
 ## Verifying that it is working
@@ -295,10 +371,10 @@ Windows
   that a person has to accept; the elevated clumsy then opens in a new
   console window and the original process exits with 0, so its output is
   gone - follow it over REST.
-- A second control channel exists on the named pipe `\\.\pipe\clumsy` (one
-  JSON request, one JSON reply, e.g. `{"cmd":"get_status"}`, `{"cmd":"quit"}`).
-  It does not use the network, so it still answers when a filter has cut
-  off the REST port.
+- A second control channel exists on the named pipe `\\.\pipe\clumsy`, or
+  `\\.\pipe\<name>` with `--pipe-name <name>` (one JSON request, one JSON
+  reply, e.g. `{"cmd":"get_status"}`, `{"cmd":"quit"}`). It does not use the
+  network, so it still answers when a filter has cut off the REST port.
 
 Linux
 - Needs CAP_NET_ADMIN (run with sudo, or install the .deb which grants it).
@@ -307,8 +383,11 @@ Linux
   rules yourself.
 - The filter language is a subset: the keywords listed above, IPv4
   addresses only. Anything unsupported is rejected at start.
-- The control channel is a Unix socket instead of a named pipe; its path is
-  printed in the startup banner.
+- The control channel is a Unix socket instead of a named pipe:
+  `/run/<name>.sock`, or `/tmp/<name>.sock` when unprivileged, where `<name>`
+  is `--pipe-name` (default `clumsy`). The path is printed in the startup
+  banner.
+- Several instances need different `--queue-num` values as well.
 - Under WSL2 clumsy only sees traffic inside the WSL2 network namespace, not
   the Windows host's applications.
 
@@ -320,7 +399,9 @@ Linux
 | exit 2 immediately                                | Read stderr: it names the option. Check `clumsy --help`.    |
 | exit 3, "needs Administrator rights"              | Not elevated. Ask the user to run the terminal as Administrator. |
 | exit 3, filter error                              | The filter did not parse. Simplify it and retry.           |
-| exit 4, "already an instance"                     | Use the running one (`GET /api/status`) or `POST /api/quit` it. |
+| exit 4, "web port ... is in use"                  | Another clumsy or program has that port. Pass a free `--web-port`. |
+| exit 4, "control pipe name is in use"             | Another clumsy has that name. Pass a unique `--pipe-name`. |
+| exit 4 or HTTP 409, "filter overlaps"             | Another instance captures some of the same packets. Narrow the filter (Recipe C). |
 | REST connection refused                           | Not started yet (poll /api/health), a different `--web-port`, or `--web off`. |
 | REST was working, now times out                   | Your filter is shaping the control port. Wait for `--timeout`, or send `{"cmd":"quit"}` to the named pipe. Exclude the port next time. |
 | 401 from every endpoint                           | A token is set. Send the `X-Clumsy-Token` header.          |

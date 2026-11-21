@@ -35,7 +35,7 @@ To run clumsy, the following files must sit next to the executable:
 | `config.json` | Filter preset definitions (recommended) | `etc/config.json` |
 | `config.txt` | Filter preset definitions (legacy) | `etc/config.txt` |
 | `web/index.html` | Web dashboard (without it, only the REST API works) | `etc/web/index.html` |
-| `web/llms.txt`, `web/llms_kr.txt` | Usage guide for AI agents in English and Korean, served at `GET /llms.txt` and `GET /llms_kr.txt` | `etc/web/` |
+| `web/llms.txt`, `web/llms_kr.txt` | Usage guide for AI agents in English and Korean, served at `GET /llms.txt` and `GET /llms_kr.txt` | repository root (`llms.txt`, `llms_kr.txt`) |
 
 > A post-build step copies these files into the output directory automatically.
 
@@ -153,10 +153,10 @@ clumsy is built to be operated by an AI coding agent (Claude Code, Codex, Cursor
 |---|---|
 | Learn the tool without prior knowledge | `clumsy --help` is generated from the code: every module with a one-line description, every parameter with its range and default, and the exit codes. It needs no privileges and starts nothing. |
 | Notice its own mistakes | An unknown option or an unusable value stops clumsy **before** anything starts (exit code 2) and the message names the fix. Nothing is silently ignored. |
-| Know whether it worked | Distinct exit codes (`0` ok, `2` bad command line, `3` capture could not start, `4` already running). A capture that cannot start — not elevated, bad filter — fails immediately instead of idling until the timeout. |
+| Know whether it worked | Distinct exit codes (`0` ok, `2` bad command line, `3` capture could not start, `4` clash with another instance). A capture that cannot start — not elevated, bad filter — fails immediately instead of idling until the timeout. |
 | A self-describing API | `GET /api/docs` lists every endpoint with an example body and the conventions; `GET /api/modules` lists every parameter with type, range and current value. |
 | Errors it can act on | Every API reply is JSON with a `status`. A wrong path or method is answered with what to use instead. A reply to a setting carries `warnings` (clamped or refused values), `unknownKeys` + `validKeys`, the `params` actually in effect, and whether a capture is running. A request in which nothing could be applied is an error, never a silent `ok`. |
-| A guide written for it | [`etc/web/llms.txt`](etc/web/llms.txt) (Korean: [`llms_kr.txt`](etc/web/llms_kr.txt)), also served by the running instance at `GET /llms.txt` and `GET /llms_kr.txt`: rules, module chooser, filter syntax, two step-by-step recipes, troubleshooting. |
+| A guide written for it | [`llms.txt`](llms.txt) (Korean: [`llms_kr.txt`](llms_kr.txt)), also served by the running instance at `GET /llms.txt` and `GET /llms_kr.txt`: rules, module chooser, filter syntax, two step-by-step recipes, troubleshooting. |
 | A way to verify | `GET /api/stats` shows packets captured and packets each module affected. |
 | A safety net | `--timeout` ends the run no matter what; `POST /api/quit` ends it on request. |
 
@@ -261,6 +261,7 @@ Other options:
 - `--enable-plugins <dir>`: load custom module DLLs (disabled by default, security-sensitive)
 - `--verbose on`: per-packet trace logging
 - `--elevate on`: relaunch via UAC if not already running as administrator
+- `--pipe-name <name>`: control pipe `\\.\pipe\<name>` (Linux: socket `/run/<name>.sock`); default `clumsy`
 - `--version`: print the version
 
 Exit codes:
@@ -270,7 +271,26 @@ Exit codes:
 | `0` | clean exit (`--timeout` reached, Ctrl+C, `POST /api/quit`) |
 | `2` | bad command line: unknown option, unusable value, or a `--profile` / `--scenario` that could not be loaded — nothing was started |
 | `3` | the capture (`--filter`) or replay (`--replay-in`) could not start, e.g. not elevated or the filter did not parse |
-| `4` | another clumsy is already running |
+| `4` | clash with another running clumsy: its `--web-port` or `--pipe-name` is taken, or the filter overlaps another instance's capture |
+
+### Several instances: different conditions per client
+
+Several clumsy processes can run at once, for example one per client on a machine that runs
+many clients, each with its own conditions. Give every instance its own `--web-port` and
+`--pipe-name` (on Linux also `--queue-num`), and pin each client's flow by both of its ports:
+
+```bash
+clumsy --web-port 8081 --pipe-name client1 --lag on --lag-time 150 \
+  --filter "(udp.SrcPort == 50001 and udp.DstPort == 7777) or (udp.SrcPort == 7777 and udp.DstPort == 50001)"
+clumsy --web-port 8082 --pipe-name client2 --drop on --drop-chance 10 \
+  --filter "(udp.SrcPort == 50002 and udp.DstPort == 7777) or (udp.SrcPort == 7777 and udp.DstPort == 50002)"
+```
+
+A filter that could match packets another running instance already captures is refused
+(exit code `4`, or HTTP `409` from `POST /api/filter`), and the message names that instance and
+an example packet both would match. Without this, a shared packet would be shaped by whichever
+instance saw it first and silently skipped by the other. The agent guide (`GET /llms.txt`,
+"Recipe C") covers finding client ports and the filter forms in detail.
 
 
 ## Web dashboard and REST API
@@ -418,8 +438,6 @@ clumsy/
 │   ├── config.json     # filter presets (JSON)
 │   ├── config.txt      # filter presets (legacy)
 │   ├── web/index.html  # web dashboard (single static file)
-│   ├── web/llms.txt    # usage guide for AI agents (served at /llms.txt)
-│   ├── web/llms_kr.txt # the same guide in Korean (served at /llms_kr.txt)
 │   └── clumsy.rc       # Windows resource file
 ├── msvc/               # Visual Studio project
 │   └── clumsy.sln
@@ -436,20 +454,24 @@ clumsy/
 ├── docs/
 │   ├── CODING_STYLE.md # code style principles
 │   ├── LINUX.md        # Linux build/run/limitations guide
-│   ├── guide_en-2.html # beginner's guide (English)
-│   └── guide.html      # beginner's guide (Korean)
+│   ├── guide_en.html   # beginner's guide (English)
+│   ├── guide.html      # beginner's guide (Korean)
+│   ├── comic.html      # comic introduction to clumsy (Korean)
+│   └── comic/          # comic panel images
 ├── Makefile            # Linux build
-├── doc_numbers.md      # serial-number ledger for new documents
-├── manual_en-1.md      # user manual (English)
+├── llms.txt            # usage guide for AI agents (copied to web/, served at /llms.txt)
+├── llms_kr.txt         # the same guide in Korean (served at /llms_kr.txt)
+├── manual_en.md        # user manual (English)
 └── manual.md           # user manual (Korean)
 ```
 
 
 ## Further documentation
 
-- **Guide for AI agents**: [etc/web/llms.txt](etc/web/llms.txt) (Korean: [etc/web/llms_kr.txt](etc/web/llms_kr.txt)) — rules, module chooser, filter syntax, recipes, troubleshooting
-- **User manual**: [manual_en-1.md](manual_en-1.md) — full feature, web UI, CLI, and API reference (Korean: [manual.md](manual.md))
-- **Beginner's guide**: [docs/guide_en-2.html](docs/guide_en-2.html) — illustrated walkthrough, including an AI-agent section (Korean: [docs/guide.html](docs/guide.html))
+- **Guide for AI agents**: [llms.txt](llms.txt) (Korean: [llms_kr.txt](llms_kr.txt)) — rules, module chooser, filter syntax, recipes, troubleshooting
+- **User manual**: [manual_en.md](manual_en.md) — full feature, web UI, CLI, and API reference (Korean: [manual.md](manual.md))
+- **Beginner's guide**: [docs/guide_en.html](docs/guide_en.html) — illustrated walkthrough, including an AI-agent section (Korean: [docs/guide.html](docs/guide.html))
+- **Comic introduction** (Korean): [docs/comic.html](docs/comic.html) — what clumsy is and how to use it, as a short comic
 - **Linux guide**: [docs/LINUX.md](docs/LINUX.md) — build, privileges, iptables integration, platform differences (Korean)
 - **Code style**: [docs/CODING_STYLE.md](docs/CODING_STYLE.md) — conventions since the C++ rewrite (Korean)
 - **Development roadmap**: [docs/ROADMAP-v2.md](docs/ROADMAP-v2.md) — completed work and future plans (Korean)

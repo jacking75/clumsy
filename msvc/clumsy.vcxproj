@@ -182,6 +182,9 @@
     <ClCompile Include="$(ProjectRoot)src\pcapreplay.cpp" />
     <ClCompile Include="$(ProjectRoot)src\plugin.cpp" />
     <ClCompile Include="$(ProjectRoot)src\packetutil_win.cpp" />
+    <ClCompile Include="$(ProjectRoot)src\filterexpr.cpp" />
+    <ClCompile Include="$(ProjectRoot)src\instance.cpp" />
+    <ClCompile Include="$(ProjectRoot)src\instance_win.cpp" />
   </ItemGroup>
 
   <ItemGroup>
@@ -189,6 +192,7 @@
     <ClInclude Include="$(ProjectRoot)src\json.h" />
     <ClInclude Include="$(ProjectRoot)src\controlapi.h" />
     <ClInclude Include="$(ProjectRoot)src\httpserver.h" />
+    <ClInclude Include="$(ProjectRoot)src\filterexpr.h" />
   </ItemGroup>
 
   <ItemGroup>
@@ -207,8 +211,10 @@ copy /Y "$(ProjectRoot)etc\config.json" "$(OutDir)" &gt; nul
 copy /Y "$(ProjectRoot)etc\config.txt" "$(OutDir)" &gt; nul
 if not exist "$(OutDir)web" mkdir "$(OutDir)web"
 copy /Y "$(ProjectRoot)etc\web\*" "$(OutDir)web\" &gt; nul
+copy /Y "$(ProjectRoot)llms.txt" "$(OutDir)web\" &gt; nul
+copy /Y "$(ProjectRoot)llms_kr.txt" "$(OutDir)web\" &gt; nul
       </Command>
-      <Message>Copying runtime files (WinDivert, config, web dashboard) to output...</Message>
+      <Message>Copying runtime files (WinDivert, config, web dashboard, agent guides) to output...</Message>
     </PostBuildEvent>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
@@ -220,8 +226,10 @@ copy /Y "$(ProjectRoot)etc\config.json" "$(OutDir)" &gt; nul
 copy /Y "$(ProjectRoot)etc\config.txt" "$(OutDir)" &gt; nul
 if not exist "$(OutDir)web" mkdir "$(OutDir)web"
 copy /Y "$(ProjectRoot)etc\web\*" "$(OutDir)web\" &gt; nul
+copy /Y "$(ProjectRoot)llms.txt" "$(OutDir)web\" &gt; nul
+copy /Y "$(ProjectRoot)llms_kr.txt" "$(OutDir)web\" &gt; nul
       </Command>
-      <Message>Copying runtime files (WinDivert, config, web dashboard) to output...</Message>
+      <Message>Copying runtime files (WinDivert, config, web dashboard, agent guides) to output...</Message>
     </PostBuildEvent>
   </ItemDefinitionGroup>
 

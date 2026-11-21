@@ -6,17 +6,18 @@
 |--------|------|----------------|
 | `packetutil_test.cpp` | 없음 | 백엔드 중립 패킷 헬퍼 4개의 동작 계약 (16 assert) |
 | `latency_test.cpp` | 없음 | 지연 분위수 보간의 정확도 (35 assert) |
-| `linux/api_test.sh` | 없음 | REST 제어 평면 전체 + 스크립트/AI 에이전트용 응답 규약 (66 assert) |
-| `windows/api_test.ps1` | 없음 | 같은 내용의 Windows판 (64 assert) |
-| `linux/behaviour_test.sh` | root | 실제 패킷이 정말 바뀌는지 (24 assert) |
-| `windows/capture_test.ps1` | 관리자 | WinDivert 실캡처 회귀 (23 assert) |
+| `filteroverlap_test.cpp` | 없음 | 다중 인스턴스의 필터 겹침 판정 (22 assert) |
+| `linux/api_test.sh` | 없음 | REST 제어 평면 전체 + 스크립트/AI 에이전트용 응답 규약 + 다중 인스턴스 충돌 (72 assert) |
+| `windows/api_test.ps1` | 없음 | 같은 내용의 Windows판 (70 assert) |
+| `linux/behaviour_test.sh` | root | 실제 패킷이 정말 바뀌는지, 클라이언트별 인스턴스 (31 assert) |
+| `windows/capture_test.ps1` | 관리자 | WinDivert 실캡처 회귀, 두 번째 인스턴스 (25 assert) |
 | `linux/nfqtest.cpp` | root | NFQUEUE 능력 프로브 (포팅 전 사전 조사용) |
 
-앞의 두 개는 `make test`가 자동으로 빌드·실행합니다. 나머지는 포트나 권한이
+앞의 세 개는 `make test`가 자동으로 빌드·실행합니다. 나머지는 포트나 권한이
 필요하므로 직접 실행합니다.
 
 ```bash
-make test                              # 단위 테스트 2종
+make test                              # 단위 테스트 3종
 tests/linux/api_test.sh                # REST 회귀
 sudo tests/linux/behaviour_test.sh     # 실패킷 검증
 ```
@@ -115,6 +116,26 @@ bandwidth 스로틀링, pcap 헤더, 정상 종료.
 `max(65535, limit*1024*2)` 바이트로 시작하므로 작은 버스트는 설계상 그대로 통과합니다.
 120×1400B = 164KB로 64KB 버킷을 넘겨야 상한이 관측됩니다. 20패킷 테스트는
 "스로틀링 없음"으로 나오는데 이는 결함이 아니라 부하 부족입니다.
+
+## `filteroverlap_test.cpp` — 필터 겹침 판정 단위 테스트
+
+clumsy는 여러 개를 동시에 띄울 수 있고(클라이언트마다 하나씩), 다른 인스턴스가 이미 캡처 중인
+패킷과 겹칠 수 있는 필터는 거부합니다. 그 판정을 하는 `filterOverlap()`의 두 가지 실패가 모두
+실제 결함입니다. "겹치지 않음"으로 잘못 판정하면 두 인스턴스가 한 패킷을 두고 다투고(먼저 본
+쪽만 적용), "겹침"으로 잘못 판정하면 클라이언트별 인스턴스 구성 자체를 못 씁니다.
+
+검증 항목 — 같은 서버의 두 클라이언트(포트 쌍)는 분리, 클라이언트 포트만 쓰면 겹침(50001→50002
+패킷), 포트 범위, 방향·IP 버전, `not (...)`와 `!=`의 의미 차이, WinDivert 전용 항목(`tcp.Syn`,
+IPv6 주소, 16진수 값)의 보수적 처리, 오류 메시지의 예시 패킷, 64포트 `--process` 필터 두 개의
+판정 시간, `--auto-iptables` 규칙끼리의 겹침(필터는 분리돼도 규칙이 넓으면 겹침).
+
+`make test`가 자동으로 빌드·실행합니다. Windows에서는 VS 개발자 명령 프롬프트에서:
+
+```bat
+cl /nologo /std:c++latest /utf-8 /EHsc /O1 /D NDEBUG /D _CRT_SECURE_NO_WARNINGS ^
+   /Isrc tests\filteroverlap_test.cpp src\filterexpr.cpp /Fe:filteroverlap_test.exe
+filteroverlap_test.exe
+```
 
 ## `latency_test.cpp` — 지연 분위수 단위 테스트
 

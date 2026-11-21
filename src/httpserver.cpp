@@ -21,6 +21,7 @@
 #  include <Windows.h>
 #else
 #  include <arpa/inet.h>
+#  include <errno.h>
 #  include <netinet/in.h>
 #  include <netinet/tcp.h>
 #  include <sys/socket.h>
@@ -127,6 +128,7 @@ static const char* statusText(int code) {
     case 404: return "Not Found";
     case 405: return "Method Not Allowed";
     case 408: return "Request Timeout";
+    case 409: return "Conflict";
     case 413: return "Payload Too Large";
     case 500: return "Internal Server Error";
     default:  return "OK";
@@ -661,7 +663,18 @@ int httpServerStart(const char *bindAddr, int port, const char *token) {
         WSACleanup();
         return 0;
     }
+    // Several clumsy instances may run side by side, each on its own port, and
+    // a script addresses one by that port alone. On Windows SO_REUSEADDR lets a
+    // second socket bind a port that is already listening, so a second clumsy
+    // given the same --web-port would share it and answer some of the first
+    // one's requests. SO_EXCLUSIVEADDRUSE makes that bind fail instead. POSIX
+    // SO_REUSEADDR only permits reuse of TIME_WAIT ports and is kept for quick
+    // restarts.
+#if defined(_WIN32)
+    setsockopt(listenSocket, SOL_SOCKET, SO_EXCLUSIVEADDRUSE, (const char*)&reuse, sizeof(reuse));
+#else
     setsockopt(listenSocket, SOL_SOCKET, SO_REUSEADDR, (const char*)&reuse, sizeof(reuse));
+#endif
 
     memset(&addr, 0, sizeof(addr));
     addr.sin_family = AF_INET;
@@ -678,12 +691,19 @@ int httpServerStart(const char *bindAddr, int port, const char *token) {
     }
 
     if (bind(listenSocket, (struct sockaddr*)&addr, sizeof(addr)) == SOCKET_ERROR) {
-        INFO("web: cannot bind %s:%d (%d) - is another clumsy or service using it?",
-             bindAddr ? bindAddr : "127.0.0.1", port, WSAGetLastError());
+        const int err = WSAGetLastError();
+#if defined(_WIN32)
+        // WSAEACCES is what an SO_EXCLUSIVEADDRUSE holder makes others see.
+        const int inUse = (err == WSAEADDRINUSE || err == WSAEACCES);
+#else
+        const int inUse = (err == EADDRINUSE);
+#endif
+        INFO("web: cannot bind %s:%d (%d)%s", bindAddr ? bindAddr : "127.0.0.1", port, err,
+             inUse ? " - the port is in use by another clumsy or another program" : "");
         closesocket(listenSocket);
         listenSocket = INVALID_SOCKET;
         WSACleanup();
-        return 0;
+        return inUse ? -1 : 0;
     }
 
     if (listen(listenSocket, SOMAXCONN) == SOCKET_ERROR) {

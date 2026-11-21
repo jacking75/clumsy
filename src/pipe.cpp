@@ -1,6 +1,7 @@
 // Named Pipe control API
 //
-// Listens on \\.\pipe\clumsy for JSON commands from an automation harness.
+// Listens on \\.\pipe\clumsy (or the --pipe-name given) for JSON commands from
+// an automation harness.
 // Connection model: one JSON request → one JSON response → disconnect.
 //
 // Phase 2.9: this file is now only a transport. Every command is parsed and
@@ -58,18 +59,40 @@ static const char *TOO_LARGE_JSON =
     STR(CONTROL_MAX_REQUEST) " byte limit\"}";
 
 // Both platforms expose the same request/response protocol; only the transport
-// primitive differs. Windows uses a Named Pipe, POSIX a Unix domain socket at
-// /run/clumsy.sock. Existing Named Pipe automation ports by swapping the
-// connect call - the JSON on the wire is identical, because both sides call
-// straight into controlDispatchJson().
+// primitive differs. Windows uses a Named Pipe \\.\pipe\<name>, POSIX a Unix
+// domain socket /run/<name>.sock. <name> is --pipe-name, "clumsy" by default;
+// every clumsy running at the same time needs its own. Existing Named Pipe
+// automation ports by swapping the connect call - the JSON on the wire is
+// identical, because both sides call straight into controlDispatchJson().
+
+// What --pipe-name may contain: it becomes part of a pipe name or a file path.
+int pipeNameValid(const char *name) {
+    size_t len;
+    if (!name) return 0;
+    len = strlen(name);
+    if (len == 0 || len > 64) return 0;
+    for (size_t i = 0; i < len; ++i) {
+        const char c = name[i];
+        if (!((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+              (c >= '0' && c <= '9') || c == '-' || c == '_' || c == '.')) return 0;
+    }
+    return 1;
+}
+
+static const char* pipeBaseName(void) {
+    const char *name = argGet("pipe-name");
+    return (name && name[0]) ? name : "clumsy";
+}
+
 #if defined(_WIN32)
 
 #include <Windows.h>
 
-#define PIPE_NAME     "\\\\.\\pipe\\clumsy"
 #define PIPE_BUF_SIZE 8192
 
 static HANDLE          pipeThread = NULL;
+static HANDLE          hPipe      = INVALID_HANDLE_VALUE;
+static char            pipePath[96] = "";
 static volatile short  pipeStop   = 0;
 volatile short         pipeStopRequested = 0;  // read by the main tick loop
 
@@ -77,37 +100,27 @@ volatile short         pipeStopRequested = 0;  // read by the main tick loop
 // Pipe server thread
 // ---------------------------------------------------------------------------
 
+// One pipe instance serves every client in turn: connect, answer, disconnect,
+// connect again. Closing it between clients - as this loop once did - frees the
+// name for that moment, and another clumsy starting then would take it over.
 static DWORD WINAPI pipeServerLoop(LPVOID arg) {
     UNREFERENCED_PARAMETER(arg);
 
     while (!pipeStop) {
-        HANDLE hPipe;
         char   reqBuf[PIPE_BUF_SIZE];
         DWORD  bytesRead = 0, bytesWritten = 0;
         BOOL   ok;
 
-        hPipe = CreateNamedPipeA(
-            PIPE_NAME,
-            PIPE_ACCESS_DUPLEX,
-            PIPE_TYPE_MESSAGE | PIPE_READMODE_MESSAGE | PIPE_WAIT,
-            1,              // only one simultaneous instance
-            PIPE_BUF_SIZE,
-            PIPE_BUF_SIZE,
-            0,              // default timeout
-            NULL);
-
-        if (hPipe == INVALID_HANDLE_VALUE) {
-            LOG("pipe: CreateNamedPipe failed (%lu)", GetLastError());
-            Sleep(1000);
-            continue;
-        }
-
         // blocks until a client connects (or pipeStop wakes us via dummy connect)
         ok = ConnectNamedPipe(hPipe, NULL);
         if (!ok && GetLastError() != ERROR_PIPE_CONNECTED) {
-            CloseHandle(hPipe);
+            // ERROR_NO_DATA: the client came and went before we got here. The
+            // instance has to be disconnected before it can accept again.
+            DisconnectNamedPipe(hPipe);
+            Sleep(10);
             continue;
         }
+        if (pipeStop) break;
 
         // Read the JSON request. A message larger than reqBuf comes back as
         // ERROR_MORE_DATA with the buffer full, which the old code treated the
@@ -159,7 +172,6 @@ static DWORD WINAPI pipeServerLoop(LPVOID arg) {
 
         FlushFileBuffers(hPipe);
         DisconnectNamedPipe(hPipe);
-        CloseHandle(hPipe);
     }
 
     return 0;
@@ -169,15 +181,50 @@ static DWORD WINAPI pipeServerLoop(LPVOID arg) {
 // Public API
 // ---------------------------------------------------------------------------
 
-void pipeServerStart(void) {
+int pipeServerStart(void) {
+    DWORD err;
+
     pipeStop          = 0;
     pipeStopRequested = 0;
+    snprintf(pipePath, sizeof(pipePath), "\\\\.\\pipe\\%s", pipeBaseName());
+
+    // Created here rather than in the thread so a name that is taken is
+    // reported to main(), which refuses to run. FILE_FLAG_FIRST_PIPE_INSTANCE
+    // is what makes it fail: without it a second clumsy would quietly add an
+    // instance to the first one's pipe and clients would reach either at random.
+    hPipe = CreateNamedPipeA(
+        pipePath,
+        PIPE_ACCESS_DUPLEX | FILE_FLAG_FIRST_PIPE_INSTANCE,
+        PIPE_TYPE_MESSAGE | PIPE_READMODE_MESSAGE | PIPE_WAIT,
+        1,              // only one simultaneous instance
+        PIPE_BUF_SIZE,
+        PIPE_BUF_SIZE,
+        0,              // default timeout
+        NULL);
+    if (hPipe == INVALID_HANDLE_VALUE) {
+        err = GetLastError();
+        if (err == ERROR_ACCESS_DENIED || err == ERROR_PIPE_BUSY) {
+            INFO("pipe: %s is already in use by another clumsy. Give each instance "
+                 "its own --pipe-name.", pipePath);
+            pipePath[0] = '\0';
+            return -1;
+        }
+        INFO("pipe: CreateNamedPipe %s failed (%lu); use the HTTP API instead.",
+             pipePath, err);
+        pipePath[0] = '\0';
+        return 0;
+    }
+
     pipeThread = CreateThread(NULL, 0, pipeServerLoop, NULL, 0, NULL);
     if (pipeThread == NULL) {
         INFO("pipe: failed to start server thread (%lu)", GetLastError());
-    } else {
-        LOG("pipe: server started on %s", PIPE_NAME);
+        CloseHandle(hPipe);
+        hPipe = INVALID_HANDLE_VALUE;
+        pipePath[0] = '\0';
+        return 0;
     }
+    LOG("pipe: server started on %s", pipePath);
+    return 1;
 }
 
 void pipeServerStop(void) {
@@ -186,15 +233,19 @@ void pipeServerStop(void) {
 
     pipeStop = 1;
     // unblock the ConnectNamedPipe by making a brief dummy client connection
-    hWakeup = CreateFileA(PIPE_NAME, GENERIC_READ, 0, NULL,
+    hWakeup = CreateFileA(pipePath, GENERIC_READ, 0, NULL,
                           OPEN_EXISTING, 0, NULL);
     if (hWakeup != INVALID_HANDLE_VALUE) CloseHandle(hWakeup);
 
     WaitForSingleObject(pipeThread, 3000);
     CloseHandle(pipeThread);
     pipeThread = NULL;
+    CloseHandle(hPipe);
+    hPipe = INVALID_HANDLE_VALUE;
     LOG("pipe: server stopped");
 }
+
+const char* pipeServerPath(void) { return pipePath; }
 
 #else   // ------------------------- POSIX -------------------------
 
@@ -252,8 +303,8 @@ static int jsonLooksComplete(const std::string &text) {
 }
 // /run is tmpfs on any modern distro, so a stale socket never survives a reboot.
 // Falls back to /tmp when clumsy is running unprivileged.
-#define SOCKET_PATH_PRIMARY  "/run/clumsy.sock"
-#define SOCKET_PATH_FALLBACK "/tmp/clumsy.sock"
+#define SOCKET_DIR_PRIMARY  "/run"
+#define SOCKET_DIR_FALLBACK "/tmp"
 
 static int             listenFd = -1;
 static char            socketPath[128] = "";
@@ -348,9 +399,38 @@ static DWORD socketServerLoop(LPVOID arg) {
     return 0;
 }
 
+// Whether a server is accepting on this socket path right now. A socket file
+// with nobody behind it is what a killed clumsy leaves.
+static int socketIsLive(const char *path) {
+    struct sockaddr_un addr;
+    const int fd = socket(AF_UNIX, SOCK_STREAM, 0);
+    int live;
+    if (fd < 0) return 0;
+    memset(&addr, 0, sizeof(addr));
+    addr.sun_family = AF_UNIX;
+    snprintf(addr.sun_path, sizeof(addr.sun_path), "%s", path);
+    live = connect(fd, (struct sockaddr*)&addr, sizeof(addr)) == 0;
+    close(fd);
+    return live;
+}
+
 // Binds the listening socket, preferring /run and falling back to /tmp.
+// Returns the fd, -1 on failure, -2 when another clumsy already serves this
+// name in either place: a root instance in /run and an unprivileged one in
+// /tmp under the same name would leave clients guessing which one they reach.
 static int bindControlSocket(void) {
-    static const char *candidates[] = { SOCKET_PATH_PRIMARY, SOCKET_PATH_FALLBACK };
+    // --pipe-name is at most 64 characters, so both paths fit sun_path (108).
+    char primary[96], fallback[96];
+    const char *candidates[2] = { primary, fallback };
+    snprintf(primary,  sizeof(primary),  "%s/%s.sock", SOCKET_DIR_PRIMARY,  pipeBaseName());
+    snprintf(fallback, sizeof(fallback), "%s/%s.sock", SOCKET_DIR_FALLBACK, pipeBaseName());
+
+    for (int i = 0; i < 2; ++i) {
+        if (socketIsLive(candidates[i])) {
+            snprintf(socketPath, sizeof(socketPath), "%s", candidates[i]);
+            return -2;
+        }
+    }
 
     for (int i = 0; i < 2; ++i) {
         struct sockaddr_un addr;
@@ -362,8 +442,7 @@ static int bindControlSocket(void) {
         snprintf(addr.sun_path, sizeof(addr.sun_path), "%s", candidates[i]);
 
         // A leftover socket file from a killed process would block bind().
-        // Safe to remove: the single-instance lock in main.cpp already
-        // guarantees no other clumsy is running.
+        // Nobody is listening on it - checked above - so it is safe to remove.
         unlink(candidates[i]);
 
         if (bind(fd, (struct sockaddr*)&addr, sizeof(addr)) == 0 &&
@@ -379,15 +458,23 @@ static int bindControlSocket(void) {
     return -1;
 }
 
-void pipeServerStart(void) {
+int pipeServerStart(void) {
     pipeStop          = 0;
     pipeStopRequested = 0;
 
     listenFd = bindControlSocket();
+    if (listenFd == -2) {
+        INFO("control socket: %s is already in use by another clumsy. Give each "
+             "instance its own --pipe-name.", socketPath);
+        socketPath[0] = '\0';
+        listenFd = -1;
+        return -1;
+    }
     if (listenFd < 0) {
-        INFO("control socket: cannot bind %s or %s (%s); use the HTTP API instead.",
-             SOCKET_PATH_PRIMARY, SOCKET_PATH_FALLBACK, strerror(errno));
-        return;
+        INFO("control socket: cannot bind %s/%s.sock or %s/%s.sock (%s); use the HTTP API instead.",
+             SOCKET_DIR_PRIMARY, pipeBaseName(), SOCKET_DIR_FALLBACK, pipeBaseName(),
+             strerror(errno));
+        return 0;
     }
 
     pipeThread = CreateThread(NULL, 0, (LPTHREAD_START_ROUTINE)socketServerLoop,
@@ -398,9 +485,10 @@ void pipeServerStart(void) {
         listenFd = -1;
         unlink(socketPath);
         socketPath[0] = '\0';
-        return;
+        return 0;
     }
     LOG("control socket: server started on %s", socketPath);
+    return 1;
 }
 
 void pipeServerStop(void) {

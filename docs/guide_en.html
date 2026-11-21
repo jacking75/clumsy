@@ -584,7 +584,7 @@ footer .flinks{display:flex; gap:16px; justify-content:center; flex-wrap:wrap; m
       </li>
       <li>
         <b>⑤ Press Ctrl+C when you are done</b>
-        <p>Press <code>Ctrl+C</code> in the console window to shut down safely. Only one clumsy can run at a time, so if you launch it again while one is already running, the new instance exits on its own.</p>
+        <p>Press <code>Ctrl+C</code> in the console window to shut down safely. You can run several clumsy instances at once (say, one per client with different conditions), but each needs its own <code>--web-port</code> and <code>--pipe-name</code>; launched again with the same ones, the new instance exits on its own.</p>
       </li>
     </ol>
 
@@ -1112,6 +1112,7 @@ footer .flinks{display:flex; gap:16px; justify-content:center; flex-wrap:wrap; m
         <tr><td>--profile &lt;name&gt;</td><td>Load and apply a profile saved in profiles.json.</td></tr>
         <tr><td>--scenario &lt;file&gt;</td><td>Load a scenario JSON file and play it as capture starts.</td></tr>
         <tr><td>--elevate on</td><td>If not running as Administrator, relaunch itself through UAC.</td></tr>
+        <tr><td>--pipe-name &lt;name&gt;</td><td>Control pipe name (default clumsy). To run several instances at once, give each its own, together with its own --web-port.</td></tr>
         <tr><td>--verbose on/off</td><td>Per-packet detailed logging (for debugging; heavy performance cost).</td></tr>
         <tr><td>--help</td><td>Print every option. It is generated from the code, down to each module parameter's range and default, so it is always up to date.</td></tr>
         <tr><td>--version</td><td>Print the version.</td></tr>
@@ -1132,7 +1133,7 @@ footer .flinks{display:flex; gap:16px; justify-content:center; flex-wrap:wrap; m
         <tr><td>0</td><td>Clean exit (<code>--timeout</code> reached, Ctrl+C, <code>POST /api/quit</code>)</td></tr>
         <tr><td>2</td><td>Command-line error: unknown option, unusable value, or a <code>--profile</code> / <code>--scenario</code> that could not be loaded. Nothing is started.</td></tr>
         <tr><td>3</td><td><code>--filter</code> (capture) or <code>--replay-in</code> (pcap replay) was given but could not start (no Administrator rights, filter syntax error, missing file and so on). clumsy exits right away instead of waiting.</td></tr>
-        <tr><td>4</td><td>Another clumsy is already running. Only the newly launched one exits; the existing instance keeps running.</td></tr>
+        <tr><td>4</td><td>Clash with another running clumsy: its web port (<code>--web-port</code>) or pipe name (<code>--pipe-name</code>) is taken, or the filter overlaps packets another instance is already capturing. Only the newly launched one exits; the existing instance keeps running.</td></tr>
       </table>
     </div>
 
@@ -1173,7 +1174,7 @@ clumsy.exe --filter "udp and outbound" --drop on --drop-chance 5.0 --stats-log r
 # Fully headless run with no dashboard (for servers/containers)
 clumsy.exe --filter "udp and outbound" --drop on --drop-chance 5.0 --web off --timeout 30</pre></div>
 
-    <p style="font-size:13px; margin-top:6px;">Every option is listed in <code>clumsy.exe --help</code> and in the manual that ships with the project (<a href="../manual_en-1.md"><code>manual_en-1.md</code></a>).</p>
+    <p style="font-size:13px; margin-top:6px;">Every option is listed in <code>clumsy.exe --help</code> and in the manual that ships with the project (<a href="../manual_en.md"><code>manual_en.md</code></a>).</p>
   </div>
 </section>
 
@@ -1290,7 +1291,7 @@ Run it against UDP port 9000 with --scenario and save an HTML report.</pre></div
         <tr><td>Tell success from failure</td><td>Distinct exit codes (0 / 2 / 3 / 4), and if capture cannot start it fails immediately instead of waiting out the timeout.</td></tr>
         <tr><td>A self-describing API</td><td><code>GET /api/docs</code> (endpoints, example bodies, rules), <code>GET /api/modules</code> (parameter types, ranges, current values)</td></tr>
         <tr><td>Actionable errors</td><td>Responses carry <code>warnings</code>, <code>unknownKeys</code>, <code>validKeys</code> and the <code>params</code> actually applied, and a request that applied nothing is answered with an error.</td></tr>
-        <tr><td>A guide written for agents</td><td><code>GET /llms.txt</code> (English), <code>GET /llms_kr.txt</code> (Korean). In the repository they live in <code>etc/web/</code> (<a href="../etc/web/llms.txt"><code>llms.txt</code></a>).</td></tr>
+        <tr><td>A guide written for agents</td><td><code>GET /llms.txt</code> (English), <code>GET /llms_kr.txt</code> (Korean). In the repository they live at the root (<a href="../llms.txt"><code>llms.txt</code></a>).</td></tr>
         <tr><td>Safety nets</td><td><code>--timeout</code> ends the run no matter what, and <code>POST /api/quit</code> ends it the moment it is requested.</td></tr>
       </table>
     </div>
@@ -1322,9 +1323,10 @@ Run it against UDP port 9000 with --scenario and save an HTML report.</pre></div
     </details>
 
     <details class="faq-item">
-      <summary>It says it is already running and quits</summary>
-      <p>Only one clumsy instance can run at a time. If one is already up, <strong>the newly launched one</strong> exits with code 4 and the existing instance keeps running.
-      Keep using the existing one from the dashboard or the REST API, or shut it down with <code>POST /api/quit</code> (or Ctrl+C in its console window) and launch again.</p>
+      <summary>A second clumsy quits with exit code 4</summary>
+      <p>Several clumsy instances can run at once, but they cannot share a web port or a pipe name, and their filters cannot match the same packets. When one of those clashes, <strong>the newly launched one</strong> prints the reason and exits with code 4; the existing instance keeps running.
+      Give each instance its own <code>--web-port</code> and <code>--pipe-name</code> (e.g. <code>--web-port 8081 --pipe-name client1</code>). If the message says <code>filter overlaps</code>, narrow the filter so it only covers this instance's client, for example <code>(udp.SrcPort == 50001 and udp.DstPort == 7777) or (udp.SrcPort == 7777 and udp.DstPort == 50001)</code>.
+      If you only wanted one clumsy, keep using the existing one from the dashboard or the REST API, or shut it down with <code>POST /api/quit</code> (or Ctrl+C in its console window) and launch again.</p>
     </details>
 
     <details class="faq-item">
@@ -1367,8 +1369,8 @@ Run it against UDP port 9000 with --scenario and save an HTML report.</pre></div
 
 <footer>
   <div class="container">
-    <p>This guide is based on the clumsy repository's <a href="../manual_en-1.md"><code>manual_en-1.md</code></a> (full reference), <a href="../README.md"><code>README.md</code></a> and <a href="LINUX.md"><code>docs/LINUX.md</code></a> (Linux build, Korean).</p>
-    <p>For deeper topics (the full scenario JSON syntax, pcap replay, plugins, Prometheus integration and more), see <a href="../manual_en-1.md"><code>manual_en-1.md</code></a> at the project root.</p>
+    <p>This guide is based on the clumsy repository's <a href="../manual_en.md"><code>manual_en.md</code></a> (full reference), <a href="../README.md"><code>README.md</code></a> and <a href="LINUX.md"><code>docs/LINUX.md</code></a> (Linux build, Korean).</p>
+    <p>For deeper topics (the full scenario JSON syntax, pcap replay, plugins, Prometheus integration and more), see <a href="../manual_en.md"><code>manual_en.md</code></a> at the project root.</p>
   </div>
 </footer>
 

@@ -57,7 +57,8 @@ SOURCES := \
 	$(SRCDIR)/latency.cpp \
 	$(SRCDIR)/report.cpp \
 	$(SRCDIR)/plugin.cpp \
-	$(SRCDIR)/filterexpr.cpp
+	$(SRCDIR)/filterexpr.cpp \
+	$(SRCDIR)/instance.cpp
 
 # Linux-only backends. Their Windows counterparts (divert.cpp, packetutil_win.cpp,
 # elevate.cpp, procfilter.cpp) are never compiled here.
@@ -67,7 +68,8 @@ SOURCES += \
 	$(SRCDIR)/packetutil_linux.cpp \
 	$(SRCDIR)/elevate_linux.cpp \
 	$(SRCDIR)/procfilter_linux.cpp \
-	$(SRCDIR)/iptables_linux.cpp
+	$(SRCDIR)/iptables_linux.cpp \
+	$(SRCDIR)/instance_linux.cpp
 
 OBJECTS := $(SOURCES:$(SRCDIR)/%.cpp=$(OBJDIR)/%.o)
 DEPS    := $(OBJECTS:.o=.d)
@@ -100,7 +102,7 @@ $(TARGET): $(OBJECTS) | $(BINDIR)
 	$(CXX) $(OBJECTS) -o $@ $(LDFLAGS)
 	@# The dashboard and presets are loaded from next to the executable.
 	@mkdir -p $(BINDIR)/web
-	@cp -f etc/web/index.html etc/web/llms.txt etc/web/llms_kr.txt $(BINDIR)/web/
+	@cp -f etc/web/index.html llms.txt llms_kr.txt $(BINDIR)/web/
 	@cp -f etc/config.json etc/config.txt $(BINDIR)/ 2>/dev/null || true
 	@echo "built $@"
 
@@ -117,10 +119,12 @@ $(OBJDIR) $(BINDIR):
 #
 # The two privileged suites are not here on purpose: tests/linux/api_test.sh
 # needs a free TCP port and tests/linux/behaviour_test.sh needs root.
-test: $(OBJDIR)/packetutil_test $(OBJDIR)/latency_test
+test: $(OBJDIR)/packetutil_test $(OBJDIR)/latency_test $(OBJDIR)/filteroverlap_test
 	@$(OBJDIR)/packetutil_test
 	@echo
 	@$(OBJDIR)/latency_test
+	@echo
+	@$(OBJDIR)/filteroverlap_test
 
 $(OBJDIR)/packetutil_test: tests/packetutil_test.cpp $(SRCDIR)/packetutil_linux.cpp \
                            $(SRCDIR)/platform_linux.cpp | $(OBJDIR)
@@ -128,6 +132,10 @@ $(OBJDIR)/packetutil_test: tests/packetutil_test.cpp $(SRCDIR)/packetutil_linux.
 
 $(OBJDIR)/latency_test: tests/latency_test.cpp $(SRCDIR)/latency.cpp \
                         $(SRCDIR)/platform_linux.cpp | $(OBJDIR)
+	$(CXX) $(CXXSTD) $(WARNINGS) -O1 -I$(SRCDIR) $^ -o $@ -pthread
+
+$(OBJDIR)/filteroverlap_test: tests/filteroverlap_test.cpp $(SRCDIR)/filterexpr.cpp \
+                              $(SRCDIR)/platform_linux.cpp | $(OBJDIR)
 	$(CXX) $(CXXSTD) $(WARNINGS) -O1 -I$(SRCDIR) $^ -o $@ -pthread
 
 install-deps:
@@ -139,8 +147,8 @@ PREFIX  ?= /usr/local
 install: $(TARGET)
 	install -D -m 0755 $(TARGET) $(DESTDIR)$(PREFIX)/bin/clumsy
 	install -D -m 0644 etc/web/index.html $(DESTDIR)$(PREFIX)/bin/web/index.html
-	install -D -m 0644 etc/web/llms.txt $(DESTDIR)$(PREFIX)/bin/web/llms.txt
-	install -D -m 0644 etc/web/llms_kr.txt $(DESTDIR)$(PREFIX)/bin/web/llms_kr.txt
+	install -D -m 0644 llms.txt $(DESTDIR)$(PREFIX)/bin/web/llms.txt
+	install -D -m 0644 llms_kr.txt $(DESTDIR)$(PREFIX)/bin/web/llms_kr.txt
 	install -D -m 0644 etc/config.json $(DESTDIR)$(PREFIX)/bin/config.json
 	@echo "installed to $(DESTDIR)$(PREFIX)/bin/clumsy"
 	@echo "grant capabilities with:"
@@ -164,7 +172,7 @@ package-deb: $(TARGET)
 	install -m 0755 packaging/deb/postinst $(PKGDIR)/DEBIAN/postinst
 	install -m 0755 $(TARGET) $(PKGDIR)/usr/bin/clumsy
 	install -m 0644 etc/config.json etc/config.txt etc/scenario-example.json 	    $(PKGDIR)/usr/share/clumsy/
-	install -m 0644 etc/web/index.html etc/web/llms.txt etc/web/llms_kr.txt $(PKGDIR)/usr/share/clumsy/web/
+	install -m 0644 etc/web/index.html llms.txt llms_kr.txt $(PKGDIR)/usr/share/clumsy/web/
 	install -m 0644 docs/LINUX.md README.md $(PKGDIR)/usr/share/doc/clumsy/
 	ln -sf ../share/clumsy/config.json       $(PKGDIR)/usr/bin/config.json
 	ln -sf ../../share/clumsy/web/index.html $(PKGDIR)/usr/bin/web/index.html
